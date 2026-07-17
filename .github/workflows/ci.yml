@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Build, lint, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        run: go build ./...
+
+      - name: Build CLI
+        run: CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bin/youtube-go-mcp ./cmd/youtube-go-mcp
+
+      - name: Version flag
+        run: ./bin/youtube-go-mcp --version
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.12.2
+
+      - name: Test
+        # -short skips live InnerTube calls (no cookies in CI).
+        run: go test ./... -short -count=1 -timeout 5m

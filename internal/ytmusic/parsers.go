@@ -5,18 +5,30 @@ type path []interface{}
 func getValue(source interface{}, path path) interface{} {
 	value := source
 	for _, element := range path {
+		if value == nil {
+			return nil
+		}
 		mustBreak := false
 		switch element.(type) {
 		case string:
-			if val, ok := value.(map[string]interface{})[element.(string)]; ok {
+			m, ok := value.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			if val, ok := m[element.(string)]; ok {
 				value = val
 			} else {
 				value = nil
 				mustBreak = true
 			}
 		case int:
-			if len(value.([]interface{})) > element.(int) {
-				value = value.([]interface{})[element.(int)]
+			arr, ok := value.([]interface{})
+			if !ok {
+				return nil
+			}
+			idx := element.(int)
+			if idx >= 0 && len(arr) > idx {
+				value = arr[idx]
 			} else {
 				value = nil
 				mustBreak = true
@@ -27,6 +39,38 @@ func getValue(source interface{}, path path) interface{} {
 		}
 	}
 	return value
+}
+
+func parseThumbnails(thumbnails interface{}) []Thumbnail {
+	arr, ok := thumbnails.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make([]Thumbnail, 0, len(arr))
+	for _, thumbnail := range arr {
+		t := Thumbnail{}
+		if url := getValue(thumbnail, path{"url"}); url != nil {
+			t.URL, _ = url.(string)
+		}
+		if width := getValue(thumbnail, path{"width"}); width != nil {
+			switch w := width.(type) {
+			case float64:
+				t.Width = int(w)
+			case int:
+				t.Width = w
+			}
+		}
+		if height := getValue(thumbnail, path{"height"}); height != nil {
+			switch h := height.(type) {
+			case float64:
+				t.Height = int(h)
+			case int:
+				t.Height = h
+			}
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 type itemType int
@@ -53,7 +97,11 @@ func parseSearchPage(page interface{}) (*SearchResult, string) {
 		}
 	}
 
-	for _, shelf := range shelves.([]interface{}) {
+	shelfList, ok := shelves.([]interface{})
+	if !ok {
+		return nil, ""
+	}
+	for _, shelf := range expandSearchSections(shelfList) {
 		content, itype, key := parseShelf(shelf)
 		if key != "" {
 			continuationKey = key
@@ -105,6 +153,37 @@ func parseSearchPage(page interface{}) (*SearchResult, string) {
 	return result, continuationKey
 }
 
+// expandSearchSections unwraps modern InnerTube search layouts where each hit is an
+// itemSectionRenderer containing a single musicResponsiveListItemRenderer (or a nested shelf).
+func expandSearchSections(shelves []interface{}) []interface{} {
+	out := make([]interface{}, 0, len(shelves))
+	for _, shelf := range shelves {
+		if getValue(shelf, path{"musicShelfRenderer"}) != nil || getValue(shelf, path{"musicShelfContinuation"}) != nil {
+			out = append(out, shelf)
+			continue
+		}
+		sectionContents, ok := getValue(shelf, path{"itemSectionRenderer", "contents"}).([]interface{})
+		if !ok {
+			continue
+		}
+		for _, content := range sectionContents {
+			if getValue(content, path{"musicShelfRenderer"}) != nil {
+				out = append(out, content)
+				continue
+			}
+			if getValue(content, path{"musicResponsiveListItemRenderer"}) != nil {
+				// Synthesize a one-item shelf so parseShelf can classify/parse it.
+				out = append(out, map[string]interface{}{
+					"musicShelfRenderer": map[string]interface{}{
+						"contents": []interface{}{content},
+					},
+				})
+			}
+		}
+	}
+	return out
+}
+
 func parseShelf(shelf interface{}) ([]interface{}, itemType, string) {
 	var shelfContents []interface{}
 
@@ -134,18 +213,22 @@ func parseShelf(shelf interface{}) ([]interface{}, itemType, string) {
 			}
 		}
 	} else if videoId := getValue(shelfContents, path{0, "musicResponsiveListItemRenderer", "playlistItemData", "videoId"}); videoId != nil {
-		if videoType := getValue(shelfContents, path{0, "musicResponsiveListItemRenderer", "overlay", "musicItemThumbnailOverlayRenderer", "content", "musicPlayButtonRenderer", "playNavigationEndpoint", "watchEndpoint", "watchEndpointMusicSupportedConfigs", "watchEndpointMusicConfig", "musicVideoType"}); videoType != nil {
-			videoType := videoType.(string)
-			switch videoType {
+		videoType := getValue(shelfContents, path{0, "musicResponsiveListItemRenderer", "overlay", "musicItemThumbnailOverlayRenderer", "content", "musicPlayButtonRenderer", "playNavigationEndpoint", "watchEndpoint", "watchEndpointMusicSupportedConfigs", "watchEndpointMusicConfig", "musicVideoType"})
+		if videoType == nil {
+			videoType = getValue(shelfContents, path{0, "musicResponsiveListItemRenderer", "flexColumns", 0, "musicResponsiveListItemFlexColumnRenderer", "text", "runs", 0, "navigationEndpoint", "watchEndpoint", "watchEndpointMusicSupportedConfigs", "watchEndpointMusicConfig", "musicVideoType"})
+		}
+		if videoType != nil {
+			switch videoType.(string) {
 			case "MUSIC_VIDEO_TYPE_ATV":
-				{
-					itype = trackItemType
-				}
+				itype = trackItemType
 			case "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC":
-				{
-					itype = videoItemType
-				}
+				itype = videoItemType
+			default:
+				// Podcast episodes etc. — treat playable catalog rows as tracks for agent use.
+				itype = trackItemType
 			}
+		} else {
+			itype = trackItemType
 		}
 	}
 	if itype == 0 {

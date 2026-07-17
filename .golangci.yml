@@ -1,0 +1,94 @@
+version: "2"
+linters:
+  enable:
+    - bodyclose
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - errorlint
+    - exhaustive
+    - exptostd
+    - fatcontext
+    - forcetypeassert
+    - goconst
+    - gocritic
+    - gomodguard_v2
+    - gosec
+    - intrange
+    - misspell
+    - modernize
+    - nestif
+    - nilerr
+    - nilnil
+    - perfsprint
+    - prealloc
+    - predeclared
+    - revive
+    - sqlclosecheck
+    - unconvert
+    - unparam
+    - usestdlibvars
+  settings:
+    goconst:
+      min-len: 3
+      min-occurrences: 8
+      ignore-tests: true
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - unnamedResult
+        - unnecessaryBlock
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    nestif:
+      min-complexity: 8
+    revive:
+      rules:
+        - name: var-naming
+          disabled: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Seed InnerTube parsers are assertion-heavy JSON walks; tighten later if rewritten.
+      - linters:
+          - forcetypeassert
+          - goconst
+          - gocritic
+          - nestif
+          - modernize
+          - unconvert
+        path: internal/ytmusic/parsers\.go
+      # JSON path keys and browseIds repeat by design across library/playlist/history.
+      - linters:
+          - goconst
+        path: internal/ytmusic/(library|playlist_detail|history|track|playlist)\.go
+      # SAPISIDHASH requires SHA-1 (YouTube protocol); InnerTube key is a public client key.
+      - linters:
+          - gosec
+        path: internal/ytmusic/(auth|constants)\.go
+      - linters:
+          - goconst
+          - gosec
+          - forcetypeassert
+          - nestif
+          - modernize
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

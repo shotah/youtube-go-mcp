@@ -1,18 +1,37 @@
-# Binaries for programs and plugins
+# Binaries
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-
-# Test binary, built with `go test -c`
 *.test
-
-# Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage
+coverage.out
+coverage.txt
+/bin/
+/dist/
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
+# Dependency directories
+/vendor/
 
+# IDE
 .idea
-test/*
+.vscode/
+*.swp
+
+# Auth / secrets — never commit
+headers.json
+browser.json
+**/headers.json
+**/browser.json
+secrets/
+*.cookies
+cookies.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local test dumps
+test/

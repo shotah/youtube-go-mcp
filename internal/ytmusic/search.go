@@ -6,6 +6,8 @@ import (
 )
 
 type SearchClient struct {
+	client *Client
+
 	Query string
 
 	Language string
@@ -17,8 +19,8 @@ type SearchClient struct {
 	newPage         bool
 }
 
-func (search *SearchClient) makeRequest() (interface{}, error) {
-	body := map[string]interface{}{}
+func (search *SearchClient) makeRequest() (any, error) {
+	body := map[string]any{}
 
 	if search.continuationKey == "" {
 		body["query"] = search.Query
@@ -34,16 +36,43 @@ func (search *SearchClient) makeRequest() (interface{}, error) {
 		params.Add("type", "next")
 	}
 
-	page, err := makeRequest(
-		"search",
-		body,
-		params,
-	)
-	if err != nil {
-		return nil, err
+	c := search.client
+	if c == nil {
+		syncDefaultGlobals()
+		c = Default
+	}
+	if search.Language != "" {
+		c = c.withLanguage(search.Language)
+	}
+	if search.Region != "" {
+		c = c.withRegion(search.Region)
 	}
 
-	return page, nil
+	return c.makeRequest("search", body, params)
+}
+
+func (c *Client) withLanguage(lang string) *Client {
+	if c == nil {
+		return &Client{Language: lang, limiter: &rateLimiter{}}
+	}
+	cp := *c
+	cp.Language = lang
+	if cp.limiter == nil {
+		cp.limiter = &rateLimiter{}
+	}
+	return &cp
+}
+
+func (c *Client) withRegion(region string) *Client {
+	if c == nil {
+		return &Client{Region: region, limiter: &rateLimiter{}}
+	}
+	cp := *c
+	cp.Region = region
+	if cp.limiter == nil {
+		cp.limiter = &rateLimiter{}
+	}
+	return &cp
 }
 
 func (search *SearchClient) NextExists() bool {

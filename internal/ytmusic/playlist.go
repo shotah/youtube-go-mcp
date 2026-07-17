@@ -4,10 +4,10 @@ import (
 	"net/url"
 )
 
-func getWatchPlaylist(videoID string) ([]*TrackItem, error) {
-	page, err := makeRequest(
+func (c *Client) getWatchPlaylist(videoID string) ([]*TrackItem, error) {
+	page, err := c.makeRequest(
 		"next",
-		map[string]interface{}{
+		map[string]any{
 			"videoId":                       videoID,
 			"playlistId":                    "RDAMVM" + videoID,
 			"enablePersistentPlaylistPanel": true,
@@ -15,10 +15,8 @@ func getWatchPlaylist(videoID string) ([]*TrackItem, error) {
 		},
 		url.Values{},
 	)
-
 	if err != nil {
 		return nil, err
 	}
-
 	return parseWatchPlaylist(page), nil
 }
