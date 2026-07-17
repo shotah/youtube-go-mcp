@@ -44,20 +44,15 @@ Library tools need your browser session — not a YouTube Data API key.
 
 ```bash
 ./bin/youtube-go-mcp auth --out headers.json
+# prompts for cookie + x-goog-authuser (from DevTools → Network → browse → Request Headers)
 export YTMUSIC_HEADERS_PATH=$PWD/headers.json
 ./bin/youtube-go-mcp --self-test
 ```
 
-Or paste DevTools request headers from an authenticated `music.youtube.com` `/browse` call into a JSON file:
-
-```json
-{
-  "cookie": "…; __Secure-3PAPISID=…; …",
-  "x-goog-authuser": "0",
-  "content-type": "application/json",
-  "x-origin": "https://music.youtube.com"
-}
-```
+1. Open [music.youtube.com](https://music.youtube.com) signed in
+2. DevTools → **Network** → filter `browse` → click **Library**
+3. Open the `browse` request → **Headers** → **Request Headers**
+4. Copy **`cookie`** and **`x-goog-authuser`** when the CLI prompts
 
 **Never commit `headers.json`.** Mount it as a secret when deploying (e.g. `secrets/ytmusic/headers.json`).
 

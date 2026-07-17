@@ -5,22 +5,29 @@ YouTube Music library tools (`get_library_playlists`, `get_liked_songs`, private
 ## One-time setup
 
 1. Open [music.youtube.com](https://music.youtube.com) and sign in (Premium session recommended).
-2. DevTools → **Network** → filter `browse`.
+2. DevTools (**F12**) → **Network** → filter `browse`.
 3. Open **Library** (or scroll) so a `POST` to `/youtubei/v1/browse` appears.
-4. Right-click the request → **Copy** → **Copy request headers**.
-5. Export headers:
+4. Click that request → **Headers** → **Request Headers**.
+5. Copy these two values (click the value text → Ctrl+C):
+   - **`cookie`** — long string; must include `__Secure-3PAPISID` or `SAPISID`
+   - **`x-goog-authuser`** — usually `0`
+6. Export:
 
 ```bash
 ./bin/youtube-go-mcp auth --out headers.json
-# paste headers, then EOF (Ctrl-Z Enter on Windows / Ctrl-D on Unix)
+# prompts:
+#   cookie: <paste, Enter>
+#   x-goog-authuser: <paste, Enter>
 export YTMUSIC_HEADERS_PATH=$PWD/headers.json
 ./bin/youtube-go-mcp auth --validate "$YTMUSIC_HEADERS_PATH"
 ./bin/youtube-go-mcp --self-test
 ```
 
-Required fields: `cookie` (must include `__Secure-3PAPISID` or `SAPISID`) and `x-goog-authuser`.
+You can paste either the bare value or a `Name: value` line — the CLI strips the prefix.
 
 **Never commit `headers.json`.** Mount it as a secret (e.g. `secrets/ytmusic/headers.json`).
+
+> Tip: Chrome often has no “Copy request headers” menu item. Copying the two Request Header values above is enough.
 
 ## When the Premium session dies
 
@@ -42,8 +49,8 @@ Search can keep working without auth; library / liked songs will not.
 ### Refresh steps
 
 1. In a normal browser, open music.youtube.com and confirm you are still signed in.
-2. Re-copy request headers from a fresh authenticated `/browse` call (same steps as setup).
-3. Overwrite the headers file the MCP / AI agent host reads:
+2. Re-copy `cookie` and `x-goog-authuser` from a fresh authenticated `/browse` call.
+3. Overwrite the headers file:
 
 ```bash
 ./bin/youtube-go-mcp auth --out /path/to/headers.json
@@ -52,8 +59,6 @@ Search can keep working without auth; library / liked songs will not.
 
 4. Restart the MCP process (or agent container) so it reloads `YTMUSIC_HEADERS_PATH`.
 5. Run `--self-test` and confirm `liked_smoke=ok` / `library_smoke=ok`.
-
-If refresh fails immediately, try a different `/browse` request after clicking Library, and ensure the copied block includes the full `cookie:` line.
 
 ## Ops tips
 

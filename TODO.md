@@ -93,12 +93,12 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 
 ## Phase 5 — Wire into an AI agent host
 
-- [ ] Dockerfile stage: static build → `/usr/local/bin/youtube-go-mcp`
-- [ ] MCP server / bundle config + grant on the main agent
-- [ ] Compose: mount `secrets/ytmusic/`, pass headers path env
-- [ ] Host docs (auth once, deploy, smoke tests)
-- [ ] Agent tools doc: search → pick track → Cast to a room / device
-- [ ] Pin commit via env ref when bundling (optional)
+- [x] Dockerfile stage in `docker_open_claw`: fetch release → `/usr/local/bin/youtube-go-mcp`
+- [x] MCP server / bundle config + grant on the main agent (`ytmusic`)
+- [x] Compose: mount `secrets/ytmusic/`, `YTMUSIC_HEADERS_PATH`
+- [x] Host docs: `docker_open_claw/docs/ytmusic.md` + `make ytmusic-auth`
+- [x] Agent tools doc: search → pick track → Cast to a room / device
+- [x] Pin via `YOUTUBE_GO_MCP_VERSION` (default `v0.0.1`)
 
 ---
 
@@ -128,7 +128,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 1. ~~Module rename + package layout (`cmd/` + `internal/ytmusic`)~~
 2. ~~Browser auth + one authenticated smoke (`GetLibraryPlaylists`)~~
 3. ~~Minimal MCP: `search_tracks` + `get_library_playlists` over stdio~~
-4. Wire into an AI agent host + Cast video-ID handoff
+4. ~~Wire into Tim (`docker_open_claw`)~~ — Cast video-ID handoff still open
 5. ~~`GetPlaylist` / `GetLikedSongs` + matching MCP tools~~
 
 ---

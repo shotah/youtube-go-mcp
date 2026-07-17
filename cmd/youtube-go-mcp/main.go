@@ -109,16 +109,22 @@ func runAuth(args []string) int {
 	}
 
 	printAuthInstructions(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Paste request headers, then finish with Ctrl-Z Enter (Windows) or Ctrl-D (Unix):")
 
-	raw, err := io.ReadAll(os.Stdin)
+	in := bufio.NewReader(os.Stdin)
+	cookie, err := promptLine(in, os.Stderr, "cookie")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "read stdin: %v\n", err)
+		fmt.Fprintf(os.Stderr, "read cookie: %v\n", err)
 		return 1
 	}
-	headers, err := parseRawHeaderDump(string(raw))
+	authUser, err := promptLine(in, os.Stderr, "x-goog-authuser")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "parse headers: %v\n", err)
+		fmt.Fprintf(os.Stderr, "read x-goog-authuser: %v\n", err)
+		return 1
+	}
+
+	headers, err := headersFromPrompts(cookie, authUser)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
 	}
 
@@ -139,58 +145,52 @@ func runAuth(args []string) int {
 	return 0
 }
 
-func parseRawHeaderDump(raw string) (map[string]string, error) {
-	headers := map[string]string{}
-	sc := bufio.NewScanner(strings.NewReader(raw))
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, ":") {
-			continue
-		}
-		// skip HTTP request line
-		if strings.HasPrefix(strings.ToUpper(line), "POST ") || strings.HasPrefix(strings.ToUpper(line), "GET ") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
-		}
-		key = strings.ToLower(strings.TrimSpace(key))
-		val = strings.TrimSpace(val)
-		if key == "" || val == "" {
-			continue
-		}
-		if strings.HasPrefix(key, "sec-") || key == "host" || key == "content-length" || key == "accept-encoding" {
-			continue
-		}
-		headers[key] = val
+func promptLine(in *bufio.Reader, errOut io.Writer, name string) (string, error) {
+	fmt.Fprintf(errOut, "%s: ", name)
+	line, err := in.ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
 	}
-	if err := sc.Err(); err != nil {
-		return nil, err
+	return strings.TrimSpace(line), nil
+}
+
+// headersFromPrompts builds a headers JSON map from the two values DevTools shows
+// under Request Headers. Accepts bare values or "Name: value" / "name: value" lines.
+func headersFromPrompts(cookie, authUser string) (map[string]string, error) {
+	cookie = stripHeaderPrefix(cookie, "cookie")
+	authUser = stripHeaderPrefix(authUser, "x-goog-authuser")
+	if cookie == "" || authUser == "" {
+		return nil, errors.New("need both cookie and x-goog-authuser (copy each value from Request Headers on a /browse call)")
 	}
-	if headers["cookie"] == "" || headers["x-goog-authuser"] == "" {
-		return nil, errors.New("need cookie and x-goog-authuser (try copying headers from a /browse request while logged in)")
+	return map[string]string{
+		"cookie":          cookie,
+		"x-goog-authuser": authUser,
+		"content-type":    "application/json",
+		"x-origin":        "https://music.youtube.com",
+	}, nil
+}
+
+func stripHeaderPrefix(raw, name string) string {
+	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
+	prefix := strings.ToLower(name) + ":"
+	if strings.HasPrefix(lower, prefix) {
+		return strings.TrimSpace(raw[len(prefix):])
 	}
-	// Ensure baseline fields ytmusicapi expects.
-	if _, ok := headers["content-type"]; !ok {
-		headers["content-type"] = "application/json"
-	}
-	if _, ok := headers["x-origin"]; !ok {
-		headers["x-origin"] = "https://music.youtube.com"
-	}
-	return headers, nil
+	return raw
 }
 
 func printAuthInstructions(w io.Writer) {
 	fmt.Fprint(w, `Browser auth setup (YouTube Music Premium session)
 
 1. Open https://music.youtube.com and sign in.
-2. DevTools → Network → filter "browse".
+2. DevTools (F12) → Network → filter "browse".
 3. Click Library (or scroll) so a POST to /youtubei/v1/browse appears.
-4. Right-click → Copy → Copy request headers.
-5. Paste them below.
+4. Click that request → Headers → Request Headers.
+5. Copy the value of cookie (long string; must include __Secure-3PAPISID).
+6. Copy the value of x-goog-authuser (usually 0).
+7. Paste each when prompted below (Enter after each).
 
-Required: cookie (with __Secure-3PAPISID) and x-goog-authuser.
 Never commit headers.json / cookies.
 
 When library/liked tools break later (session expired / HTTP 401-403):
