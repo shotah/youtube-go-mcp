@@ -285,6 +285,7 @@ func parseTrackItem(trackItem interface{}) *TrackItem {
 			track.PlaylistID = playlistId.(string)
 		}
 	}
+	track.VideoID = firstNonEmpty(track.VideoID, videoIDFromListItem(trackItem))
 
 	if info2 := getValue(trackItem, path{"musicResponsiveListItemRenderer", "flexColumns", 1, "musicResponsiveListItemFlexColumnRenderer", "text", "runs"}); info2 != nil {
 		for _, run := range info2.([]interface{}) {
@@ -506,6 +507,7 @@ func parseVideoItem(videoItem interface{}) *VideoItem {
 			video.PlaylistID = playlistId.(string)
 		}
 	}
+	video.VideoID = firstNonEmpty(video.VideoID, videoIDFromListItem(videoItem))
 
 	if info2 := getValue(videoItem, path{"musicResponsiveListItemRenderer", "flexColumns", 1, "musicResponsiveListItemFlexColumnRenderer", "text", "runs"}); info2 != nil {
 		for _, run := range info2.([]interface{}) {
@@ -652,4 +654,20 @@ func parseSearchSuggestions(page interface{}) []string {
 		}
 	}
 	return result
+}
+
+// videoIDFromListItem pulls a videoId from playlistItemData / play overlay when the
+// title run's watchEndpoint omits it (common in modern YTM search shelves).
+func videoIDFromListItem(item any) string {
+	data := getValue(item, path{"musicResponsiveListItemRenderer"})
+	if data == nil {
+		return ""
+	}
+	if v, ok := getValue(data, path{"playlistItemData", "videoId"}).(string); ok && v != "" {
+		return v
+	}
+	if v, ok := getValue(data, path{"overlay", "musicItemThumbnailOverlayRenderer", "content", "musicPlayButtonRenderer", "playNavigationEndpoint", "watchEndpoint", "videoId"}).(string); ok {
+		return v
+	}
+	return ""
 }

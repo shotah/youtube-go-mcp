@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -97,14 +98,16 @@ type searchTracksInput struct {
 }
 
 type trackOut struct {
-	VideoID    string   `json:"videoId"`
-	PlaylistID string   `json:"playlistId,omitempty"`
-	Title      string   `json:"title"`
-	Artists    []string `json:"artists"`
-	Duration   int      `json:"duration"`
-	IsExplicit bool     `json:"isExplicit"`
-	URL        string   `json:"url"`
-	MusicURL   string   `json:"musicUrl"`
+	VideoID string `json:"videoId"`
+	// VideoIDSnake mirrors videoId for mcp-beam beam_youtube_video (expects video_id).
+	VideoIDSnake string   `json:"video_id"`
+	PlaylistID   string   `json:"playlistId,omitempty"`
+	Title        string   `json:"title"`
+	Artists      []string `json:"artists"`
+	Duration     int      `json:"duration"`
+	IsExplicit   bool     `json:"isExplicit"`
+	URL          string   `json:"url"`
+	MusicURL     string   `json:"musicUrl"`
 }
 
 type searchTracksOutput struct {
@@ -130,11 +133,14 @@ func (s *Server) searchTracks(ctx context.Context, _ *mcp.CallToolRequest, in se
 	}
 
 	out := searchTracksOutput{Tracks: make([]trackOut, 0, limit)}
-	for i, t := range result.Tracks {
-		if i >= limit {
-			break
+	for _, t := range result.Tracks {
+		if t == nil || t.VideoID == "" {
+			continue
 		}
 		out.Tracks = append(out.Tracks, trackToOut(t))
+		if len(out.Tracks) >= limit {
+			break
+		}
 	}
 	return nil, out, nil
 }
@@ -368,9 +374,10 @@ type castTargetInput struct {
 }
 
 type castTargetOutput struct {
-	VideoID  string `json:"videoId"`
-	URL      string `json:"url"`
-	MusicURL string `json:"musicUrl"`
+	VideoID      string `json:"videoId"`
+	VideoIDSnake string `json:"video_id"`
+	URL          string `json:"url"`
+	MusicURL     string `json:"musicUrl"`
 	// CastHint describes how a Cast MCP should target YouTube receivers.
 	CastHint string `json:"castHint"`
 }
@@ -381,10 +388,11 @@ func (s *Server) formatCastTarget(ctx context.Context, _ *mcp.CallToolRequest, i
 		return toolError("videoId is required"), castTargetOutput{}, nil
 	}
 	return nil, castTargetOutput{
-		VideoID:  in.VideoID,
-		URL:      "https://www.youtube.com/watch?v=" + in.VideoID,
-		MusicURL: "https://music.youtube.com/watch?v=" + in.VideoID,
-		CastHint: "Pass videoId to mcp-beam beam_youtube_video (YouTube Cast receiver). Do not beam music.youtube.com watch URLs with beam_media.",
+		VideoID:      in.VideoID,
+		VideoIDSnake: in.VideoID,
+		URL:          "https://www.youtube.com/watch?v=" + in.VideoID,
+		MusicURL:     "https://music.youtube.com/watch?v=" + in.VideoID,
+		CastHint:     "Call mcp-beam beam_youtube_video with arguments.video_id set to this video_id (11-char id). Do not pass url/musicUrl to beam_media.",
 	}, nil
 }
 
@@ -420,14 +428,15 @@ func trackToOut(t *ytmusic.TrackItem) trackOut {
 		}
 	}
 	return trackOut{
-		VideoID:    t.VideoID,
-		PlaylistID: t.PlaylistID,
-		Title:      t.Title,
-		Artists:    artists,
-		Duration:   t.Duration,
-		IsExplicit: t.IsExplicit,
-		URL:        "https://www.youtube.com/watch?v=" + t.VideoID,
-		MusicURL:   "https://music.youtube.com/watch?v=" + t.VideoID,
+		VideoID:      t.VideoID,
+		VideoIDSnake: t.VideoID,
+		PlaylistID:   t.PlaylistID,
+		Title:        t.Title,
+		Artists:      artists,
+		Duration:     t.Duration,
+		IsExplicit:   t.IsExplicit,
+		URL:          "https://www.youtube.com/watch?v=" + t.VideoID,
+		MusicURL:     "https://music.youtube.com/watch?v=" + t.VideoID,
 	}
 }
 
@@ -469,7 +478,9 @@ func toolErrFrom(err error) *mcp.CallToolResult {
 	msg := err.Error()
 	switch {
 	case errors.Is(err, ytmusic.ErrSessionExpired), errors.Is(err, ytmusic.ErrInvalidAuth):
-		msg += " | " + ytmusic.AuthRefreshHint
+		if !strings.Contains(msg, ytmusic.AuthRefreshHint) {
+			msg += " | " + ytmusic.AuthRefreshHint
+		}
 	case errors.Is(err, ytmusic.ErrRateLimited):
 		msg += " | slow down or raise YTMUSIC_MIN_REQUEST_INTERVAL_MS / wait and retry"
 	case errors.Is(err, ytmusic.ErrAuthRequired):

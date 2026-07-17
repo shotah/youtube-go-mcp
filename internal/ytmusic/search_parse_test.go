@@ -125,3 +125,32 @@ func TestParseSearchPageItemSections(t *testing.T) {
 		t.Fatalf("playlists=%+v", result.Playlists)
 	}
 }
+
+func TestParseTrackItemVideoIDFromPlaylistItemData(t *testing.T) {
+	raw := `{
+	  "musicResponsiveListItemRenderer": {
+	    "playlistItemData": {"videoId": "onlyInPlaylistData"},
+	    "flexColumns": [
+	      {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+	        {"text": "No Watch Endpoint"}
+	      ]}}},
+	      {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
+	        {"text": "Artist", "navigationEndpoint": {"browseEndpoint": {
+	          "browseId": "UCa",
+	          "browseEndpointContextSupportedConfigs": {
+	            "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ARTIST"}
+	          }
+	        }}}
+	      ]}}}
+	    ]
+	  }
+	}`
+	var item any
+	if err := json.Unmarshal([]byte(raw), &item); err != nil {
+		t.Fatal(err)
+	}
+	track := parseTrackItem(item)
+	if track == nil || track.VideoID != "onlyInPlaylistData" {
+		t.Fatalf("got %+v", track)
+	}
+}

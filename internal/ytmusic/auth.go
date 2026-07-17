@@ -112,6 +112,9 @@ func (a *BrowserAuth) Apply(req *http.Request, now time.Time) {
 }
 
 func sapisidFromCookie(raw string) string {
+	// Prefer __Secure-3PAPISID (what music.youtube.com / ytmusicapi use for SAPISIDHASH).
+	// Falling back to the first matching name can pick the wrong secret when both exist.
+	var sapisid string
 	for part := range strings.SplitSeq(raw, ";") {
 		part = strings.TrimSpace(part)
 		if part == "" {
@@ -122,11 +125,15 @@ func sapisidFromCookie(raw string) string {
 			continue
 		}
 		switch strings.TrimSpace(name) {
-		case "__Secure-3PAPISID", "SAPISID":
+		case "__Secure-3PAPISID":
 			return strings.TrimSpace(value)
+		case "SAPISID":
+			if sapisid == "" {
+				sapisid = strings.TrimSpace(value)
+			}
 		}
 	}
-	return ""
+	return sapisid
 }
 
 func firstNonEmpty(vals ...string) string {

@@ -14,4 +14,4 @@ var (
 )
 
 // AuthRefreshHint is short guidance for agents / operators when auth fails at runtime.
-const AuthRefreshHint = "Re-run: youtube-go-mcp auth --out headers.json (or replace the mounted headers file), then restart the MCP. Do not log out of music.youtube.com in the browser that minted the session unless you intend to invalidate it."
+const AuthRefreshHint = "Re-run: youtube-go-mcp auth --out headers.json (or replace the mounted headers file). The MCP reloads that file when its mtime changes; restart only if the process still has no AuthPath. Do not log out of music.youtube.com in the browser that minted the session unless you intend to invalidate it."

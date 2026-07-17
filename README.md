@@ -20,7 +20,7 @@ Seeded from [raitonoberu/ytmusic](https://github.com/raitonoberu/ytmusic); rebra
 | `get_watch_playlist` | optional | Radio / continuum from a seed `videoId` |
 | `get_track` | optional | Track metadata; optional lyrics for song understanding |
 | `get_lyrics` | optional | Plain-text lyrics when YouTube Music provides them |
-| `format_cast_target` | no | `videoId` → URLs + hint to call mcp-beam `beam_youtube_video` |
+| `format_cast_target` | no | `videoId` / `video_id` + URLs + hint for mcp-beam `beam_youtube_video` |
 
 ## Build
 

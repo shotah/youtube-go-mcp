@@ -57,7 +57,7 @@ Search can keep working without auth; library / liked songs will not.
 ./bin/youtube-go-mcp auth --validate /path/to/headers.json
 ```
 
-4. Restart the MCP process (or agent container) so it reloads `YTMUSIC_HEADERS_PATH`.
+4. The MCP **reloads `headers.json` automatically** when the file’s modification time changes (no restart required for a normal overwrite). Restart only if the process was started without `YTMUSIC_HEADERS_PATH` / `--headers`.
 5. Run `--self-test` and confirm `liked_smoke=ok` / `library_smoke=ok`.
 
 ## Ops tips
@@ -65,9 +65,10 @@ Search can keep working without auth; library / liked songs will not.
 | Tip | Why |
 |---|---|
 | Prefer a dedicated browser profile for the agent session | Avoids accidental logout while browsing elsewhere |
-| Don’t rotate the headers file mid-request | Restart after replacing secrets |
+| Overwrite the same mounted headers path in place | The process watches mtime and picks up the new cookie on the next request |
 | Keep `YTMUSIC_HEADERS_PATH` pointed at the mounted secret | Same path your agent host’s compose uses |
 | On repeated 429s, raise `YTMUSIC_MIN_REQUEST_INTERVAL_MS` | Gentle spacing reduces rate limits |
+| Prefer cookies that include `__Secure-3PAPISID` | Used for SAPISIDHASH (falls back to `SAPISID`) |
 
 ## Related env
 

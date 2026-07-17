@@ -60,14 +60,12 @@ func run(args []string) int {
 		path = os.Getenv("YTMUSIC_HEADERS_PATH")
 	}
 	if path != "" {
-		auth, err := ytmusic.LoadAuthFromFile(path)
-		if err != nil {
+		if err := client.SetAuthPath(path); err != nil {
 			fmt.Fprintf(os.Stderr, "auth load failed: %v\n", err)
 			if *selfTest {
 				return 1
 			}
 		} else {
-			client.Auth = auth
 			ytmusic.Default = client
 		}
 	}

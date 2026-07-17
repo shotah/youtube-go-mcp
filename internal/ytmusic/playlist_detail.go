@@ -240,14 +240,7 @@ func parsePlaylistShelfTrack(item any) *TrackItem {
 	}
 
 	if track.VideoID == "" {
-		if v, ok := getValue(data, path{"playlistItemData", "videoId"}).(string); ok {
-			track.VideoID = v
-		}
-	}
-	if track.VideoID == "" {
-		if v, ok := getValue(data, path{"overlay", "musicItemThumbnailOverlayRenderer", "content", "musicPlayButtonRenderer", "playNavigationEndpoint", "watchEndpoint", "videoId"}).(string); ok {
-			track.VideoID = v
-		}
+		track.VideoID = videoIDFromListItem(item)
 	}
 	if track.Title == "" {
 		track.Title = stringFromRuns(getValue(data, path{"flexColumns", 0, "musicResponsiveListItemFlexColumnRenderer", "text", "runs"}))

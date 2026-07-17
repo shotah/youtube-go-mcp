@@ -83,6 +83,7 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 				request.Header.Set(k, v)
 			}
 		}
+		c.maybeReloadAuth()
 		if c.Auth != nil {
 			c.Auth.Apply(request, c.Now())
 		}
@@ -111,8 +112,14 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 			lastSnippet = lastSnippet[:300] + "…"
 		}
 
-		if isAuthFailureStatus(response.StatusCode) && c.Authenticated() {
-			return nil, fmt.Errorf("%w: %s HTTP %d: %s — %s", ErrSessionExpired, endpoint, response.StatusCode, lastSnippet, AuthRefreshHint)
+		if isAuthFailureStatus(response.StatusCode) {
+			// If the operator replaced headers.json after our last load, retry once with fresh cookies.
+			if c.reloadAuthIfChanged() && attempt+1 < maxAttempts {
+				continue
+			}
+			if c.Authenticated() {
+				return nil, fmt.Errorf("%w: %s HTTP %d: %s — %s", ErrSessionExpired, endpoint, response.StatusCode, lastSnippet, AuthRefreshHint)
+			}
 		}
 
 		if !shouldRetryStatus(response.StatusCode) || attempt+1 >= maxAttempts {

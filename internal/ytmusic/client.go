@@ -1,9 +1,11 @@
 package ytmusic
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -26,7 +28,9 @@ type Client struct {
 	ClientName    string
 	ClientVersion string
 	Auth          *BrowserAuth
-	Now           func() time.Time
+	// AuthPath is the headers.json path to auto-reload when the file's mtime changes.
+	AuthPath string
+	Now      func() time.Time
 	// Sleep is used for throttle/backoff delays; defaults to time.Sleep.
 	Sleep func(time.Duration)
 
@@ -35,7 +39,9 @@ type Client struct {
 	// MaxRetries is how many times to retry on 429/503 after the first attempt. Default 3.
 	MaxRetries int
 
-	limiter *rateLimiter
+	limiter     *rateLimiter
+	authMu      *sync.Mutex // pointer so Client value-copies (withLanguage/etc.) stay valid
+	authModTime time.Time
 }
 
 // NewClient returns a Client with sensible defaults.
@@ -52,6 +58,7 @@ func NewClient() *Client {
 		MinRequestInterval: defaultMinRequestInterval,
 		MaxRetries:         defaultMaxRetries,
 		limiter:            &rateLimiter{},
+		authMu:             &sync.Mutex{},
 	}
 	if v := os.Getenv(envClientVersion); v != "" {
 		c.ClientVersion = v
@@ -67,17 +74,38 @@ func NewClient() *Client {
 		}
 	}
 	if path := os.Getenv(envHeadersPath); path != "" {
-		if auth, err := LoadAuthFromFile(path); err == nil {
-			c.Auth = auth
-		}
+		_ = c.SetAuthPath(path)
 	}
 	return c
 }
 
+func (c *Client) ensureAuthMu() {
+	if c.authMu == nil {
+		c.authMu = &sync.Mutex{}
+	}
+}
+
+// SetAuthPath configures the headers file used for browser auth and loads it immediately.
+// Subsequent requests reload from disk when the file's modification time changes.
+func (c *Client) SetAuthPath(path string) error {
+	if c == nil {
+		return ErrInvalidAuth
+	}
+	c.ensureAuthMu()
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	c.AuthPath = path
+	return c.reloadAuthLocked(true)
+}
+
 // WithAuth returns a shallow copy using the given auth (shares the rate limiter).
+// AuthPath is cleared so the copy does not keep reloading the previous file.
 func (c *Client) WithAuth(auth *BrowserAuth) *Client {
 	cp := *c
 	cp.Auth = auth
+	cp.AuthPath = ""
+	cp.authModTime = time.Time{}
+	cp.authMu = &sync.Mutex{}
 	if cp.limiter == nil {
 		cp.limiter = &rateLimiter{}
 	}
@@ -86,7 +114,60 @@ func (c *Client) WithAuth(auth *BrowserAuth) *Client {
 
 // Authenticated reports whether browser credentials are configured.
 func (c *Client) Authenticated() bool {
-	return c != nil && c.Auth != nil && c.Auth.Cookie != "" && c.Auth.SAPISID != ""
+	if c == nil {
+		return false
+	}
+	c.maybeReloadAuth()
+	return c.Auth != nil && c.Auth.Cookie != "" && c.Auth.SAPISID != ""
+}
+
+// maybeReloadAuth reloads Auth from AuthPath when the file mtime advances.
+func (c *Client) maybeReloadAuth() {
+	if c == nil || c.AuthPath == "" {
+		return
+	}
+	c.ensureAuthMu()
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	_ = c.reloadAuthLocked(false)
+}
+
+// reloadAuthIfChanged reloads when mtime changed. Returns true if Auth was replaced.
+func (c *Client) reloadAuthIfChanged() bool {
+	if c == nil || c.AuthPath == "" {
+		return false
+	}
+	c.ensureAuthMu()
+	c.authMu.Lock()
+	defer c.authMu.Unlock()
+	before := c.Auth
+	beforeMod := c.authModTime
+	_ = c.reloadAuthLocked(false)
+	return c.Auth != before || !c.authModTime.Equal(beforeMod)
+}
+
+func (c *Client) reloadAuthLocked(force bool) error {
+	path := c.AuthPath
+	if path == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("%w: stat %s: %w", ErrInvalidAuth, path, err)
+	}
+	mod := info.ModTime()
+	if !force && c.Auth != nil && !c.authModTime.IsZero() && !mod.After(c.authModTime) {
+		return nil
+	}
+	auth, err := LoadAuthFromFile(path)
+	if err != nil {
+		// Advance mtime so a broken rewrite does not retry on every request.
+		c.authModTime = mod
+		return err
+	}
+	c.Auth = auth
+	c.authModTime = mod
+	return nil
 }
 
 // Default is the package-level client used by convenience helpers.
