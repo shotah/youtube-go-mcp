@@ -384,7 +384,7 @@ func (s *Server) formatCastTarget(ctx context.Context, _ *mcp.CallToolRequest, i
 		VideoID:  in.VideoID,
 		URL:      "https://www.youtube.com/watch?v=" + in.VideoID,
 		MusicURL: "https://music.youtube.com/watch?v=" + in.VideoID,
-		CastHint: "Cast by videoId to a YouTube Cast receiver (not a raw media URL).",
+		CastHint: "Pass videoId to mcp-beam beam_youtube_video (YouTube Cast receiver). Do not beam music.youtube.com watch URLs with beam_media.",
 	}, nil
 }
 

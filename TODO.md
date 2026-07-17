@@ -85,8 +85,8 @@ Thin MCP over the client — keep the AI agent tool surface small.
 Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 
 - [x] Document contract: this MCP returns `videoId` + `https://music.youtube.com/watch?v=…` / `youtube.com/watch?v=…`
-- [ ] Coordinate with a Cast MCP (e.g. mcp-beam / go2tv): **cast by video ID** (YouTube receiver), not only raw media URLs
-- [ ] Until Cast supports video-ID: temporary guidance for the AI agent (don’t invent free-MP3 fallbacks)
+- [x] Coordinate with a Cast MCP (e.g. mcp-beam / go2tv): **cast by video ID** (YouTube receiver), not only raw media URLs — mcp-beam `beam_youtube_video`
+- [x] Guidance: do not invent free-MP3 fallbacks; pass `videoId` to `beam_youtube_video` (not Music watch URLs to `beam_media`)
 - [x] Optional helper tool: `format_cast_target(videoId)` → payload Cast expects
 
 ---
@@ -98,7 +98,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 - [x] Compose: mount `secrets/ytmusic/`, `YTMUSIC_HEADERS_PATH`
 - [x] Host docs: `docker_open_claw/docs/ytmusic.md` + `make ytmusic-auth`
 - [x] Agent tools doc: search → pick track → Cast to a room / device
-- [x] Pin via `YOUTUBE_GO_MCP_VERSION` (default `v0.0.1`)
+- [x] Pin via `YOUTUBE_GO_MCP_VERSION` (default `v0.0.2` in Tim)
 
 ---
 
