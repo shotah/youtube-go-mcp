@@ -52,6 +52,7 @@ func testClient(t *testing.T, handler http.HandlerFunc) *Client {
 		MaxRetries:         0,
 		limiter:            &rateLimiter{},
 		authMu:             &sync.Mutex{},
+		visitorID:          "test-visitor", // skip live music.youtube.com HTML fetch
 	}
 }
 

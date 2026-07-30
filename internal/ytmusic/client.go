@@ -19,6 +19,7 @@ const (
 	envClientVersion     = "YTMUSIC_CLIENT_VERSION"
 	envMinIntervalMS     = "YTMUSIC_MIN_REQUEST_INTERVAL_MS"
 	envMaxRetries        = "YTMUSIC_MAX_RETRIES"
+	envOnBehalfOfUser    = "YTMUSIC_ON_BEHALF_OF_USER"
 )
 
 // Client talks to YouTube Music InnerTube endpoints.
@@ -45,6 +46,11 @@ type Client struct {
 	limiter     *rateLimiter
 	authMu      *sync.Mutex // pointer so Client value-copies (withLanguage/etc.) stay valid
 	authModTime time.Time
+	visitorID   string // cached X-Goog-Visitor-Id (ytmusicapi parity)
+
+	// OnBehalfOfUser is a Brand Account numeric id (optional).
+	// Set via YTMUSIC_ON_BEHALF_OF_USER — see docs/auth.md.
+	OnBehalfOfUser string
 }
 
 // NewClient returns a Client with sensible defaults.
@@ -84,6 +90,9 @@ func NewClient() *Client {
 		if path := os.Getenv(envHeadersPath); path != "" {
 			_ = c.SetAuthPath(path)
 		}
+	}
+	if v := strings.TrimSpace(os.Getenv(envOnBehalfOfUser)); v != "" {
+		c.OnBehalfOfUser = v
 	}
 	return c
 }

@@ -66,14 +66,15 @@ linters:
           - modernize
           - unconvert
         path: internal/ytmusic/parsers\.go
-      # JSON path keys and browseIds repeat by design across library/playlist/history.
+      # JSON path keys and browseIds repeat by design across library/playlist/history/probe.
       - linters:
           - goconst
-        path: internal/ytmusic/(library|playlist_detail|history|track|playlist)\.go
+        path: internal/ytmusic/(library|playlist_detail|history|track|playlist|visitor)\.go
       # SAPISIDHASH requires SHA-1 (YouTube protocol); InnerTube key is a public client key.
+      # SOCS cookie is ytmusicapi consent bootstrap (not a session secret).
       - linters:
           - gosec
-        path: internal/ytmusic/(auth|constants)\.go
+        path: internal/ytmusic/(auth|constants|request|visitor)\.go
       - linters:
           - goconst
           - gosec

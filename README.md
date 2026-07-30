@@ -52,21 +52,32 @@ make release BUMP=patch   # or TAG=v0.2.0
 
 ## Auth (Premium / library)
 
-Library tools need a signed-in identity. **Prefer OAuth** (survives normal YouTube
-browser logins). Browser cookies still work but die easily when that session logs in again.
+Library tools need the Google account that owns your YouTube Music Library /
+Liked Songs. **Prefer OAuth** (survives normal browser logins). Cookies still
+work but die when that session logs in again.
 
 ```bash
 # Google Cloud: enable YouTube Data API v3 → OAuth client type "TVs and Limited Input devices"
 export YTMUSIC_OAUTH_CLIENT_ID='….apps.googleusercontent.com'
 export YTMUSIC_OAUTH_CLIENT_SECRET='…'
 ./bin/youtube-go-mcp auth oauth --out oauth.json
+# Approve google.com/device as your *personal* Gmail (incognito if you have multiple accounts)
 export YTMUSIC_OAUTH_PATH=$PWD/oauth.json
 ./bin/youtube-go-mcp --self-test
 ```
 
-Legacy browser cookies: `youtube-go-mcp auth browser --out headers.json` + `YTMUSIC_HEADERS_PATH`.
+Gotchas (full detail in [docs/auth.md](docs/auth.md)):
 
-**Never commit `oauth.json` / `headers.json` / client secrets.** Full guide: [docs/auth.md](docs/auth.md).
+- GCP project email ≠ which account the token uses — identity is whoever clicks
+  **Allow** on the device page.
+- Empty Liked Songs → run `auth oauth --whoami` and `auth oauth --probe-library`
+  (wrong Google/Brand Account, or older binary missing visitor-id headers).
+- Brand Account library: set `YTMUSIC_ON_BEHALF_OF_USER` (see auth docs).
+- If both OAuth and `YTMUSIC_HEADERS_PATH` are set, **OAuth wins**.
+
+Legacy cookies: `youtube-go-mcp auth browser --out headers.json` + `YTMUSIC_HEADERS_PATH`.
+
+**Never commit `oauth.json` / `headers.json` / client secrets.**
 
 ### Rate limits
 

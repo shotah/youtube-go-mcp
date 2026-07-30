@@ -130,26 +130,35 @@ func normalizePlaylistID(id string) string {
 func playlistShelf(page any) any {
 	candidates := []path{
 		{"contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents", 0, "musicPlaylistShelfRenderer"},
+		{"contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents", 0, "musicShelfRenderer"},
 		{"contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents", 0, "itemSectionRenderer", "contents", 0, "musicPlaylistShelfRenderer"},
 		{"contents", "singleColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents", 0, "musicPlaylistShelfRenderer"},
+		{"contents", "singleColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents", 0, "musicShelfRenderer"},
 	}
 	for _, p := range candidates {
 		if v := getValue(page, p); v != nil {
 			return v
 		}
 	}
-	// Walk section list for a playlist shelf.
-	sections := getValue(page, path{"contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents"})
-	list, ok := sections.([]any)
-	if !ok {
-		return nil
+	// Walk section list for a playlist / music shelf.
+	sectionRoots := []path{
+		{"contents", "twoColumnBrowseResultsRenderer", "secondaryContents", "sectionListRenderer", "contents"},
+		{"contents", "singleColumnBrowseResultsRenderer", "tabs", 0, "tabRenderer", "content", "sectionListRenderer", "contents"},
 	}
-	for _, section := range list {
-		if v := getValue(section, path{"musicPlaylistShelfRenderer"}); v != nil {
-			return v
+	for _, root := range sectionRoots {
+		list, ok := getValue(page, root).([]any)
+		if !ok {
+			continue
 		}
-		if v := getValue(section, path{"itemSectionRenderer", "contents", 0, "musicPlaylistShelfRenderer"}); v != nil {
-			return v
+		for _, section := range list {
+			for _, key := range []string{"musicPlaylistShelfRenderer", "musicShelfRenderer"} {
+				if v := getValue(section, path{key}); v != nil {
+					return v
+				}
+				if v := getValue(section, path{"itemSectionRenderer", "contents", 0, key}); v != nil {
+					return v
+				}
+			}
 		}
 	}
 	return nil

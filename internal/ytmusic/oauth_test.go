@@ -125,6 +125,9 @@ func TestOAuthApplySetsBearer(t *testing.T) {
 	if got := req.Header.Get("Authorization"); got != "Bearer tok" {
 		t.Fatalf("Authorization=%q", got)
 	}
+	if req.Header.Get("X-Goog-Request-Time") == "" {
+		t.Fatal("missing X-Goog-Request-Time")
+	}
 }
 
 func TestLoadOAuthTokenFromFile(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -35,17 +36,25 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 		c.ClientVersion = defaultClientVersion
 	}
 
+	clientCtx := map[string]any{
+		"clientName":    c.ClientName,
+		"clientVersion": c.ClientVersion,
+		"hl":            c.Language,
+		"gl":            c.Region,
+	}
+	if vid := c.ensureVisitorID(); vid != "" {
+		clientCtx["visitorData"] = vid
+	}
+	userCtx := map[string]any{
+		"lockedSafetyMode": false,
+	}
+	if id := strings.TrimSpace(c.OnBehalfOfUser); id != "" {
+		userCtx["onBehalfOfUser"] = id
+	}
 	payload := map[string]any{
 		"context": map[string]any{
-			"client": map[string]any{
-				"clientName":    c.ClientName,
-				"clientVersion": c.ClientVersion,
-				"hl":            c.Language,
-				"gl":            c.Region,
-			},
-			"user": map[string]any{
-				"lockedSafetyMode": false,
-			},
+			"client": clientCtx,
+			"user":   userCtx,
 		},
 	}
 	maps.Copy(payload, body)
@@ -82,6 +91,10 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 			for _, v := range vals {
 				request.Header.Set(k, v)
 			}
+		}
+		request.AddCookie(&http.Cookie{Name: "SOCS", Value: "CAI"})
+		if vid := c.ensureVisitorID(); vid != "" {
+			request.Header.Set("X-Goog-Visitor-Id", vid)
 		}
 		if err := c.applyAuth(request); err != nil {
 			return nil, err

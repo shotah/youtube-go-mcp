@@ -112,6 +112,8 @@ func runAuthOAuth(args []string) int {
 	clientID := fs.String("client-id", "", "Google OAuth client id (or YTMUSIC_OAUTH_CLIENT_ID)")
 	clientSecret := fs.String("client-secret", "", "Google OAuth client secret (or YTMUSIC_OAUTH_CLIENT_SECRET)")
 	validate := fs.String("validate", "", "validate an existing oauth.json and exit")
+	whoami := fs.Bool("whoami", false, "print Google tokeninfo email for configured OAuth and exit")
+	probe := fs.Bool("probe-library", false, "fetch library/liked/history diagnostics and exit")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -124,6 +126,16 @@ func runAuthOAuth(args []string) int {
 		}
 		fmt.Fprintf(os.Stderr, "valid oauth.json (refresh_token present, expires_at=%d)\n", tok.ExpiresAt)
 		return 0
+	}
+
+	if *whoami || *probe {
+		return runOAuthDiagnostics(oauthDiagOpts{
+			outPath:      *outPath,
+			clientID:     *clientID,
+			clientSecret: *clientSecret,
+			whoami:       *whoami,
+			probe:        *probe,
+		})
 	}
 
 	creds := ytmusic.OAuthCredentials{
@@ -215,6 +227,56 @@ func firstFlagOrEnv(flagVal, envName string) string {
 		return strings.TrimSpace(flagVal)
 	}
 	return strings.TrimSpace(os.Getenv(envName))
+}
+
+type oauthDiagOpts struct {
+	outPath      string
+	clientID     string
+	clientSecret string
+	whoami       bool
+	probe        bool
+}
+
+func runOAuthDiagnostics(opts oauthDiagOpts) int {
+	client := ytmusic.NewClient()
+	// Prefer env for diagnostics; --out is the mint path (default oauth.json).
+	oauthPath := strings.TrimSpace(os.Getenv("YTMUSIC_OAUTH_PATH"))
+	if oauthPath == "" {
+		oauthPath = opts.outPath
+	}
+	if err := client.SetOAuthPath(
+		oauthPath,
+		firstFlagOrEnv(opts.clientID, "YTMUSIC_OAUTH_CLIENT_ID"),
+		firstFlagOrEnv(opts.clientSecret, "YTMUSIC_OAUTH_CLIENT_SECRET"),
+	); err != nil {
+		fmt.Fprintf(os.Stderr, "oauth load failed: %v\n", err)
+		return 1
+	}
+	if opts.whoami {
+		info, err := client.WhoAmI()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "whoami failed: %v\n", err)
+			return 1
+		}
+		b, _ := json.MarshalIndent(info, "", "  ")
+		fmt.Println(string(b))
+		if info.Email == "" {
+			fmt.Fprintln(os.Stderr, "warning: tokeninfo has no email — openid/email scope may be missing; still check Liked Songs probe")
+		}
+		return 0
+	}
+	probeResult, err := client.ProbeLibrary()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "probe-library failed: %v\n", err)
+		if probeResult != nil {
+			b, _ := json.MarshalIndent(probeResult, "", "  ")
+			fmt.Println(string(b))
+		}
+		return 1
+	}
+	b, _ := json.MarshalIndent(probeResult, "", "  ")
+	fmt.Println(string(b))
+	return 0
 }
 
 type authLoadOpts struct {
@@ -315,6 +377,8 @@ func printAuthUsage(w io.Writer) {
 
   youtube-go-mcp auth oauth [--out oauth.json] [--client-id ID] [--client-secret SECRET]
   youtube-go-mcp auth oauth --validate oauth.json
+  youtube-go-mcp auth oauth --whoami              # token + YouTube channel for configured OAuth
+  youtube-go-mcp auth oauth --probe-library       # diagnose empty Liked Songs / library
   youtube-go-mcp auth browser [--out headers.json]
   youtube-go-mcp auth browser --validate headers.json
 
@@ -336,6 +400,7 @@ Env:
   YTMUSIC_OAUTH_PATH                Path to oauth.json (preferred)
   YTMUSIC_OAUTH_CLIENT_ID           Google OAuth client id
   YTMUSIC_OAUTH_CLIENT_SECRET       Google OAuth client secret
+  YTMUSIC_ON_BEHALF_OF_USER         Optional Brand Account id (myaccount.google.com/brandaccounts)
   YTMUSIC_HEADERS_PATH              Path to browser headers JSON (legacy)
   YTMUSIC_CLIENT_VERSION            Override InnerTube clientVersion
   YTMUSIC_MIN_REQUEST_INTERVAL_MS   Min spacing between calls (default 250)

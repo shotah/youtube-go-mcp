@@ -41,6 +41,7 @@ func TestThrottleAndRetryOn429(t *testing.T) {
 	var calls atomic.Int32
 	var slept atomic.Int64
 	client := NewClient()
+	client.visitorID = "test-visitor"
 	client.MinRequestInterval = 10 * time.Millisecond
 	client.MaxRetries = 2
 	client.Sleep = func(d time.Duration) {
@@ -81,6 +82,7 @@ func TestThrottleAndRetryOn429(t *testing.T) {
 
 func TestRateLimitedAfterExhaustedRetries(t *testing.T) {
 	client := NewClient()
+	client.visitorID = "test-visitor"
 	client.MinRequestInterval = 0
 	client.MaxRetries = 1
 	client.Sleep = func(time.Duration) {}
@@ -101,6 +103,7 @@ func TestRateLimitedAfterExhaustedRetries(t *testing.T) {
 
 func TestSessionExpiredOn401(t *testing.T) {
 	client := NewClient()
+	client.visitorID = "test-visitor"
 	client.MinRequestInterval = 0
 	client.MaxRetries = 0
 	client.Auth = &BrowserAuth{

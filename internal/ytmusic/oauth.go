@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -329,6 +330,12 @@ func (s *OAuthSession) Apply(req *http.Request) error {
 	req.Header.Set("Authorization", typ+" "+s.Token.AccessToken)
 	req.Header.Set("X-Origin", origin)
 	req.Header.Set("Origin", origin)
+	// ytmusicapi sets this on every OAuth InnerTube call.
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	req.Header.Set("X-Goog-Request-Time", strconv.FormatInt(now().Unix(), 10))
 	return nil
 }
 
