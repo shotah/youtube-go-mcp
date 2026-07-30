@@ -14,16 +14,13 @@ import (
 )
 
 const (
+	origin = "https://www.youtube.com"
+
 	oauthScope   = "https://www.googleapis.com/auth/youtube"
 	oauthCodeURL = "https://www.youtube.com/o/oauth2/device/code"
 	//nolint:gosec // G101: OAuth token endpoint URL, not a credential
 	oauthTokenURL  = "https://oauth2.googleapis.com/token"
 	oauthUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:88.0) Gecko/20100101 Firefox/88.0 Cobalt/Version"
-
-	envOAuthPath     = "YTMUSIC_OAUTH_PATH"
-	envOAuthClientID = "YTMUSIC_OAUTH_CLIENT_ID"
-	//nolint:gosec // G101: env var name, not a secret value
-	envOAuthClientSecret = "YTMUSIC_OAUTH_CLIENT_SECRET"
 
 	oauthRefreshSkew   = 60 * time.Second
 	oauthErrorSnippetN = 200
@@ -316,6 +313,22 @@ func (s *OAuthSession) EnsureAccessToken(force bool) error {
 	return nil
 }
 
+// BearerToken implements youtube.TokenSource (Data API client).
+func (s *OAuthSession) BearerToken() (string, error) {
+	if s == nil {
+		return "", ErrAuthRequired
+	}
+	if err := s.EnsureAccessToken(false); err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Token == nil || strings.TrimSpace(s.Token.AccessToken) == "" {
+		return "", ErrAuthRequired
+	}
+	return s.Token.AccessToken, nil
+}
+
 // Apply sets Authorization: Bearer <access_token>, refreshing if needed.
 func (s *OAuthSession) Apply(req *http.Request) error {
 	if s == nil || req == nil {
@@ -379,4 +392,13 @@ func truncate(s string) string {
 		return s
 	}
 	return s[:oauthErrorSnippetN] + "…"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }

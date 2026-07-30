@@ -8,14 +8,11 @@ import (
 func TestRegisteredToolNames(t *testing.T) {
 	names := RegisteredToolNames()
 	want := []string{
-		"tracks_search",
-		"library_list_playlists",
+		"videos_search",
+		"videos_get",
 		"playlists_get",
-		"library_list_liked_songs",
-		"library_list_history",
-		"tracks_list_watch_playlist",
-		"tracks_get",
-		"tracks_get_lyrics",
+		"library_list_playlists",
+		"library_list_liked_videos",
 		"cast_format_target",
 	}
 	if len(names) != len(want) {

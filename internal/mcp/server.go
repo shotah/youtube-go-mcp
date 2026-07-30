@@ -2,7 +2,6 @@ package mcp
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/shotah/youtube-go-mcp/internal/youtube"
 	"github.com/shotah/youtube-go-mcp/internal/ytmusic"
 )
 
@@ -19,49 +19,43 @@ const ServerName = "youtube-go-mcp"
 // ServerVersion is set at build time via ldflags (see Makefile / GoReleaser).
 var ServerVersion = "dev"
 
-// Server wraps the YouTube Music client as an MCP tool surface.
+// Server wraps the YouTube Data API v3 client as an MCP tool surface.
 type Server struct {
-	Client *ytmusic.Client
-	Log    *log.Logger
+	YT  *youtube.Client
+	Log *log.Logger
 }
 
-// New creates an MCP server bound to the given ytmusic client.
-func New(client *ytmusic.Client) *Server {
-	if client == nil {
-		client = ytmusic.NewClient()
-	}
+// New creates an MCP server bound to the given Data API client.
+func New(yt *youtube.Client) *Server {
 	return &Server{
-		Client: client,
-		Log:    log.New(os.Stderr, "youtube-go-mcp: ", log.LstdFlags|log.Lmsgprefix),
+		YT:  yt,
+		Log: log.New(os.Stderr, "youtube-go-mcp: ", log.LstdFlags|log.Lmsgprefix),
 	}
 }
 
-// Tool names follow google-mcp style: {service}_{verb}_{object}.
-// Hosts expose them as {server}__{tool} (ai-gantry server id = youtube).
-// Do not prefix with youtube_ — the server id already does.
+func (s *Server) ready() bool {
+	return s != nil && s.YT != nil && s.YT.Tokens != nil
+}
+
+// Tool names: {service}_{verb}_{object…} — see ai-gantry docs/mcp-naming.md.
+// Hosts expose {server}__{tool} (server id = youtube). Never prefix youtube_.
 const (
-	ToolTracksSearch            = "tracks_search"
-	ToolLibraryListPlaylists    = "library_list_playlists"
-	ToolPlaylistsGet            = "playlists_get"
-	ToolLibraryListLikedSongs   = "library_list_liked_songs"
-	ToolLibraryListHistory      = "library_list_history"
-	ToolTracksListWatchPlaylist = "tracks_list_watch_playlist"
-	ToolTracksGet               = "tracks_get"
-	ToolTracksGetLyrics         = "tracks_get_lyrics"
-	ToolCastFormatTarget        = "cast_format_target"
+	ToolVideosSearch           = "videos_search"
+	ToolVideosGet              = "videos_get"
+	ToolPlaylistsGet           = "playlists_get"
+	ToolLibraryListPlaylists   = "library_list_playlists"
+	ToolLibraryListLikedVideos = "library_list_liked_videos"
+	ToolCastFormatTarget       = "cast_format_target"
 )
 
 // RegisteredToolNames returns the MCP tool names in registration order.
 func RegisteredToolNames() []string {
 	return []string{
-		ToolTracksSearch,
-		ToolLibraryListPlaylists,
+		ToolVideosSearch,
+		ToolVideosGet,
 		ToolPlaylistsGet,
-		ToolLibraryListLikedSongs,
-		ToolLibraryListHistory,
-		ToolTracksListWatchPlaylist,
-		ToolTracksGet,
-		ToolTracksGetLyrics,
+		ToolLibraryListPlaylists,
+		ToolLibraryListLikedVideos,
 		ToolCastFormatTarget,
 	}
 }
@@ -74,103 +68,162 @@ func (s *Server) Run(ctx context.Context) error {
 	}, nil)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolTracksSearch,
-		Description: "Search YouTube Music for tracks. Returns videoId, title, artists, duration, and cast-friendly URLs.",
-	}, s.searchTracks)
+		Name:        ToolVideosSearch,
+		Description: "Search YouTube videos by query. Returns videoId, title, channel, duration, and cast-friendly URLs. Set musicOnly for Music category (10). Requires OAuth.",
+	}, s.searchVideos)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolLibraryListPlaylists,
-		Description: "List playlists from the authenticated YouTube Music library. Requires browser session headers.",
-	}, s.getLibraryPlaylists)
+		Name:        ToolVideosGet,
+		Description: "Get metadata for a YouTube videoId (title, channel, duration, cast URLs). Requires OAuth.",
+	}, s.getVideo)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolPlaylistsGet,
-		Description: "Get tracks from a YouTube Music playlist by playlist id (PL…, RD…, or LM for Liked Songs).",
+		Description: "List videos in a YouTube playlist by playlist id (PL…, LL…). Requires OAuth.",
 	}, s.getPlaylist)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolLibraryListLikedSongs,
-		Description: "Get tracks from the authenticated user's Liked Songs. Useful for taste-aware suggestions. Requires browser session headers.",
-	}, s.getLikedSongs)
+		Name:        ToolLibraryListPlaylists,
+		Description: "List playlists owned by the authenticated YouTube channel. Requires OAuth.",
+	}, s.listPlaylists)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolLibraryListHistory,
-		Description: "Get recently played YouTube Music tracks (listening history) for continuity and suggestions. Requires browser session headers.",
-	}, s.getHistory)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolTracksListWatchPlaylist,
-		Description: "Get a radio / continuum playlist seeded from a videoId.",
-	}, s.getWatchPlaylist)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolTracksGet,
-		Description: "Get metadata for a videoId (title, artists, duration, cast URLs). Set includeLyrics to also fetch lyrics when available — useful for understanding the song.",
-	}, s.getTrack)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolTracksGetLyrics,
-		Description: "Get plain-text lyrics for a videoId when YouTube Music provides them. Returns available=false when the track has no lyrics.",
-	}, s.getLyrics)
+		Name:        ToolLibraryListLikedVideos,
+		Description: "List videos the authenticated user liked on YouTube (thumbs-up). Not YouTube Music Liked Songs. Set musicOnly to keep music-leaning rows (category 10 / Topic / title heuristics). Requires OAuth.",
+	}, s.listLikedVideos)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        ToolCastFormatTarget,
-		Description: "Format a videoId into the payload Cast / Nest (or similar) integrations expect.",
+		Description: "Format a videoId into cast-ready fields (videoId, video_id, url). Playback is separate — pass video_id to your Cast/YouTube bridge. Same handoff for music or any video.",
 	}, s.formatCastTarget)
 
-	s.Log.Printf("starting stdio MCP (%s %s), auth=%v", ServerName, ServerVersion, s.Client.Authenticated())
+	s.Log.Printf("starting stdio MCP (%s %s), auth=%v", ServerName, ServerVersion, s.ready())
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
-type searchTracksInput struct {
-	Query string `json:"query" jsonschema:"YouTube Music search query"`
-	Limit int    `json:"limit,omitempty" jsonschema:"Max tracks to return (default 10, max 50)"`
+type videoOut struct {
+	VideoID      string `json:"videoId"`
+	VideoIDSnake string `json:"video_id"`
+	Title        string `json:"title"`
+	ChannelID    string `json:"channelId,omitempty"`
+	ChannelTitle string `json:"channelTitle,omitempty"`
+	CategoryID   string `json:"categoryId,omitempty"`
+	DurationSec  int    `json:"durationSec,omitempty"`
+	URL          string `json:"url"`
+	MusicURL     string `json:"musicUrl,omitempty"`
+	// MusicLikely is true when category / Topic / title heuristics say music.
+	MusicLikely bool `json:"musicLikely,omitempty"`
 }
 
-type trackOut struct {
-	VideoID string `json:"videoId"`
-	// VideoIDSnake mirrors videoId for mcp-beam beam_youtube_video (expects video_id).
-	VideoIDSnake string   `json:"video_id"`
-	PlaylistID   string   `json:"playlistId,omitempty"`
-	Title        string   `json:"title"`
-	Artists      []string `json:"artists"`
-	Duration     int      `json:"duration"`
-	IsExplicit   bool     `json:"isExplicit"`
-	URL          string   `json:"url"`
-	MusicURL     string   `json:"musicUrl"`
+func videoToOut(v youtube.Video) videoOut {
+	likely := youtube.LooksLikeMusic(v) || v.MusicURL != ""
+	return videoOut{
+		VideoID:      v.VideoID,
+		VideoIDSnake: v.VideoID,
+		Title:        v.Title,
+		ChannelID:    v.ChannelID,
+		ChannelTitle: v.ChannelTitle,
+		CategoryID:   v.CategoryID,
+		DurationSec:  v.DurationSec,
+		URL:          v.URL,
+		MusicURL:     v.MusicURL,
+		MusicLikely:  likely,
+	}
 }
 
-type searchTracksOutput struct {
-	Tracks []trackOut `json:"tracks"`
+type searchVideosInput struct {
+	Query     string `json:"query" jsonschema:"YouTube search query"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"Max videos to return (default 10, max 50)"`
+	MusicOnly bool   `json:"musicOnly,omitempty" jsonschema:"When true, restrict to Music category (videoCategoryId=10)"`
 }
 
-func (s *Server) searchTracks(ctx context.Context, _ *mcp.CallToolRequest, in searchTracksInput) (*mcp.CallToolResult, searchTracksOutput, error) {
+type searchVideosOutput struct {
+	Videos []videoOut `json:"videos"`
+}
+
+func (s *Server) searchVideos(ctx context.Context, _ *mcp.CallToolRequest, in searchVideosInput) (*mcp.CallToolResult, searchVideosOutput, error) {
 	_ = ctx
-	if in.Query == "" {
-		return toolError("query is required"), searchTracksOutput{}, nil
+	if !s.ready() {
+		return toolErrFrom(ytmusic.ErrAuthRequired), searchVideosOutput{}, nil
 	}
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 10
+	if strings.TrimSpace(in.Query) == "" {
+		return toolError("query is required"), searchVideosOutput{}, nil
 	}
-	if limit > 50 {
-		limit = 50
-	}
+	limit := clampLimit(in.Limit, 10, 50)
 
-	result, err := s.Client.TrackSearch(in.Query).Next()
+	items, err := s.YT.SearchVideos(youtube.SearchOptions{
+		Query:      in.Query,
+		MaxResults: limit,
+		MusicOnly:  in.MusicOnly,
+	})
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("search failed: %w", err)), searchTracksOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolVideosSearch, err)), searchVideosOutput{}, nil
 	}
-
-	out := searchTracksOutput{Tracks: make([]trackOut, 0, limit)}
-	for _, t := range result.Tracks {
-		if t == nil || t.VideoID == "" {
+	out := searchVideosOutput{Videos: make([]videoOut, 0, len(items))}
+	for i := range items {
+		if items[i].VideoID == "" {
 			continue
 		}
-		out.Tracks = append(out.Tracks, trackToOut(t))
-		if len(out.Tracks) >= limit {
-			break
+		out.Videos = append(out.Videos, videoToOut(items[i]))
+	}
+	return nil, out, nil
+}
+
+type getVideoInput struct {
+	VideoID string `json:"videoId" jsonschema:"YouTube videoId (11 chars)"`
+}
+
+type getVideoOutput struct {
+	Video videoOut `json:"video"`
+}
+
+func (s *Server) getVideo(ctx context.Context, _ *mcp.CallToolRequest, in getVideoInput) (*mcp.CallToolResult, getVideoOutput, error) {
+	_ = ctx
+	if !s.ready() {
+		return toolErrFrom(ytmusic.ErrAuthRequired), getVideoOutput{}, nil
+	}
+	if strings.TrimSpace(in.VideoID) == "" {
+		return toolError("videoId is required"), getVideoOutput{}, nil
+	}
+	v, err := s.YT.GetVideo(in.VideoID)
+	if err != nil {
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolVideosGet, err)), getVideoOutput{}, nil
+	}
+	return nil, getVideoOutput{Video: videoToOut(*v)}, nil
+}
+
+type getPlaylistInput struct {
+	PlaylistID string `json:"playlistId" jsonschema:"Playlist id (PL…, LL…). VL- prefix optional."`
+	Limit      int    `json:"limit,omitempty" jsonschema:"Max videos to return (default 50, max 200)"`
+}
+
+type playlistOutput struct {
+	ID     string     `json:"id"`
+	Videos []videoOut `json:"videos"`
+}
+
+func (s *Server) getPlaylist(ctx context.Context, _ *mcp.CallToolRequest, in getPlaylistInput) (*mcp.CallToolResult, playlistOutput, error) {
+	_ = ctx
+	if !s.ready() {
+		return toolErrFrom(ytmusic.ErrAuthRequired), playlistOutput{}, nil
+	}
+	if strings.TrimSpace(in.PlaylistID) == "" {
+		return toolError("playlistId is required"), playlistOutput{}, nil
+	}
+	limit := clampLimit(in.Limit, 50, 200)
+	items, err := s.YT.ListPlaylistItems(in.PlaylistID, youtube.ListOptions{MaxResults: limit})
+	if err != nil {
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolPlaylistsGet, err)), playlistOutput{}, nil
+	}
+	out := playlistOutput{
+		ID:     strings.TrimPrefix(strings.TrimSpace(in.PlaylistID), "VL"),
+		Videos: make([]videoOut, 0, len(items)),
+	}
+	for i := range items {
+		if items[i].VideoID == "" {
+			continue
 		}
+		out.Videos = append(out.Videos, videoToOut(items[i]))
 	}
 	return nil, out, nil
 }
@@ -182,309 +235,90 @@ type libraryPlaylistsInput struct {
 type libraryPlaylistOut struct {
 	PlaylistID string `json:"playlistId"`
 	Title      string `json:"title"`
-	Count      string `json:"count,omitempty"`
+	ItemCount  int64  `json:"itemCount,omitempty"`
+	URL        string `json:"url,omitempty"`
 }
 
 type libraryPlaylistsOutput struct {
 	Playlists []libraryPlaylistOut `json:"playlists"`
 }
 
-func (s *Server) getLibraryPlaylists(ctx context.Context, _ *mcp.CallToolRequest, in libraryPlaylistsInput) (*mcp.CallToolResult, libraryPlaylistsOutput, error) {
+func (s *Server) listPlaylists(ctx context.Context, _ *mcp.CallToolRequest, in libraryPlaylistsInput) (*mcp.CallToolResult, libraryPlaylistsOutput, error) {
 	_ = ctx
-	if !s.Client.Authenticated() {
+	if !s.ready() {
 		return toolErrFrom(ytmusic.ErrAuthRequired), libraryPlaylistsOutput{}, nil
 	}
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-
-	playlists, err := s.Client.GetLibraryPlaylists(limit)
+	limit := clampLimit(in.Limit, 25, 50)
+	items, err := s.YT.ListMyPlaylists(youtube.ListOptions{MaxResults: limit})
 	if err != nil {
 		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListPlaylists, err)), libraryPlaylistsOutput{}, nil
 	}
-
-	out := libraryPlaylistsOutput{Playlists: make([]libraryPlaylistOut, 0, len(playlists))}
-	for _, p := range playlists {
+	out := libraryPlaylistsOutput{Playlists: make([]libraryPlaylistOut, 0, len(items))}
+	for i := range items {
 		out.Playlists = append(out.Playlists, libraryPlaylistOut{
-			PlaylistID: p.PlaylistID,
-			Title:      p.Title,
-			Count:      p.Count,
+			PlaylistID: items[i].ID,
+			Title:      items[i].Title,
+			ItemCount:  items[i].ItemCount,
+			URL:        items[i].URL,
 		})
 	}
 	return nil, out, nil
 }
 
-type getPlaylistInput struct {
-	PlaylistID string `json:"playlistId" jsonschema:"Playlist id (PL…, RD…, LM for Liked Songs). VL- prefix optional."`
-	Limit      int    `json:"limit,omitempty" jsonschema:"Max tracks to return (default 50, max 200)"`
+type likedVideosInput struct {
+	Limit     int  `json:"limit,omitempty" jsonschema:"Max liked videos to return (default 50, max 200)"`
+	MusicOnly bool `json:"musicOnly,omitempty" jsonschema:"When true, keep only music-leaning likes (category 10 / Topic / title heuristics)"`
 }
 
-type playlistOutput struct {
-	ID         string     `json:"id"`
-	Title      string     `json:"title"`
-	Author     string     `json:"author,omitempty"`
-	TrackCount int        `json:"trackCount,omitempty"`
-	Tracks     []trackOut `json:"tracks"`
+type likedVideosOutput struct {
+	Videos []videoOut `json:"videos"`
 }
 
-func (s *Server) getPlaylist(ctx context.Context, _ *mcp.CallToolRequest, in getPlaylistInput) (*mcp.CallToolResult, playlistOutput, error) {
+func (s *Server) listLikedVideos(ctx context.Context, _ *mcp.CallToolRequest, in likedVideosInput) (*mcp.CallToolResult, likedVideosOutput, error) {
 	_ = ctx
-	if in.PlaylistID == "" {
-		return toolError("playlistId is required"), playlistOutput{}, nil
+	if !s.ready() {
+		return toolErrFrom(ytmusic.ErrAuthRequired), likedVideosOutput{}, nil
 	}
 	limit := clampLimit(in.Limit, 50, 200)
-
-	detail, err := s.Client.GetPlaylist(in.PlaylistID, limit)
+	items, err := s.YT.ListLikedVideos(youtube.ListOptions{MaxResults: limit, MusicOnly: in.MusicOnly})
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolPlaylistsGet, err)), playlistOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListLikedVideos, err)), likedVideosOutput{}, nil
 	}
-	return nil, playlistToOut(detail), nil
-}
-
-type likedSongsInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Max liked tracks to return (default 50, max 200)"`
-}
-
-func (s *Server) getLikedSongs(ctx context.Context, _ *mcp.CallToolRequest, in likedSongsInput) (*mcp.CallToolResult, playlistOutput, error) {
-	_ = ctx
-	if !s.Client.Authenticated() {
-		return toolErrFrom(ytmusic.ErrAuthRequired), playlistOutput{}, nil
-	}
-	limit := clampLimit(in.Limit, 50, 200)
-
-	detail, err := s.Client.GetLikedSongs(limit)
-	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListLikedSongs, err)), playlistOutput{}, nil
-	}
-	return nil, playlistToOut(detail), nil
-}
-
-type historyInput struct {
-	Limit int `json:"limit,omitempty" jsonschema:"Max history items to return (default 50, max 200)"`
-}
-
-type historyTrackOut struct {
-	trackOut
-	Played string `json:"played,omitempty"`
-}
-
-type historyOutput struct {
-	Tracks []historyTrackOut `json:"tracks"`
-}
-
-func (s *Server) getHistory(ctx context.Context, _ *mcp.CallToolRequest, in historyInput) (*mcp.CallToolResult, historyOutput, error) {
-	_ = ctx
-	if !s.Client.Authenticated() {
-		return toolErrFrom(ytmusic.ErrAuthRequired), historyOutput{}, nil
-	}
-	limit := clampLimit(in.Limit, 50, 200)
-
-	items, err := s.Client.GetHistory(limit)
-	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListHistory, err)), historyOutput{}, nil
-	}
-
-	out := historyOutput{Tracks: make([]historyTrackOut, 0, len(items))}
-	for _, item := range items {
-		if item == nil || item.VideoID == "" {
+	out := likedVideosOutput{Videos: make([]videoOut, 0, len(items))}
+	for i := range items {
+		if items[i].VideoID == "" {
 			continue
 		}
-		out.Tracks = append(out.Tracks, historyTrackOut{
-			trackOut: trackToOut(&ytmusic.TrackItem{
-				VideoID:    item.VideoID,
-				PlaylistID: item.PlaylistID,
-				Title:      item.Title,
-				Artists:    item.Artists,
-				Album:      item.Album,
-				Duration:   item.Duration,
-				IsExplicit: item.IsExplicit,
-				Thumbnails: item.Thumbnails,
-			}),
-			Played: item.Played,
-		})
+		out.Videos = append(out.Videos, videoToOut(items[i]))
 	}
 	return nil, out, nil
-}
-
-type watchPlaylistInput struct {
-	VideoID string `json:"videoId" jsonschema:"Seed track videoId"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"Max tracks to return (default 25)"`
-}
-
-type watchPlaylistOutput struct {
-	Tracks []trackOut `json:"tracks"`
-}
-
-func (s *Server) getWatchPlaylist(ctx context.Context, _ *mcp.CallToolRequest, in watchPlaylistInput) (*mcp.CallToolResult, watchPlaylistOutput, error) {
-	_ = ctx
-	if in.VideoID == "" {
-		return toolError("videoId is required"), watchPlaylistOutput{}, nil
-	}
-	limit := in.Limit
-	if limit <= 0 {
-		limit = 25
-	}
-
-	tracks, err := s.Client.GetWatchPlaylist(in.VideoID)
-	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksListWatchPlaylist, err)), watchPlaylistOutput{}, nil
-	}
-
-	out := watchPlaylistOutput{Tracks: make([]trackOut, 0, limit)}
-	for i, t := range tracks {
-		if i >= limit {
-			break
-		}
-		if t == nil || t.VideoID == "" {
-			continue
-		}
-		out.Tracks = append(out.Tracks, trackToOut(t))
-	}
-	return nil, out, nil
-}
-
-type getTrackInput struct {
-	VideoID       string `json:"videoId" jsonschema:"YouTube Music videoId"`
-	IncludeLyrics bool   `json:"includeLyrics,omitempty" jsonschema:"When true, also fetch lyrics if available (default false)"`
-}
-
-type trackDetailOut struct {
-	trackOut
-	Album     string `json:"album,omitempty"`
-	Lyrics    string `json:"lyrics,omitempty"`
-	HasLyrics bool   `json:"hasLyrics"`
-}
-
-func (s *Server) getTrack(ctx context.Context, _ *mcp.CallToolRequest, in getTrackInput) (*mcp.CallToolResult, trackDetailOut, error) {
-	_ = ctx
-	if in.VideoID == "" {
-		return toolError("videoId is required"), trackDetailOut{}, nil
-	}
-
-	detail, err := s.Client.GetTrack(in.VideoID, in.IncludeLyrics)
-	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksGet, err)), trackDetailOut{}, nil
-	}
-	return nil, trackDetailToOut(detail), nil
-}
-
-type getLyricsInput struct {
-	VideoID string `json:"videoId" jsonschema:"YouTube Music videoId"`
-}
-
-type lyricsOutput struct {
-	VideoID   string `json:"videoId"`
-	Lyrics    string `json:"lyrics,omitempty"`
-	Available bool   `json:"available"`
-}
-
-func (s *Server) getLyrics(ctx context.Context, _ *mcp.CallToolRequest, in getLyricsInput) (*mcp.CallToolResult, lyricsOutput, error) {
-	_ = ctx
-	if in.VideoID == "" {
-		return toolError("videoId is required"), lyricsOutput{}, nil
-	}
-
-	lyrics, err := s.Client.GetLyrics(in.VideoID)
-	if errors.Is(err, ytmusic.ErrNoLyrics) {
-		return nil, lyricsOutput{VideoID: in.VideoID, Available: false}, nil
-	}
-	if err != nil {
-		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksGetLyrics, err)), lyricsOutput{}, nil
-	}
-	return nil, lyricsOutput{
-		VideoID:   in.VideoID,
-		Lyrics:    lyrics,
-		Available: lyrics != "",
-	}, nil
 }
 
 type castTargetInput struct {
-	VideoID string `json:"videoId" jsonschema:"YouTube / YouTube Music videoId"`
+	VideoID string `json:"videoId" jsonschema:"YouTube videoId"`
 }
 
 type castTargetOutput struct {
 	VideoID      string `json:"videoId"`
 	VideoIDSnake string `json:"video_id"`
 	URL          string `json:"url"`
-	MusicURL     string `json:"musicUrl"`
-	// CastHint describes how a Cast MCP should target YouTube receivers.
-	CastHint string `json:"castHint"`
+	CastHint     string `json:"castHint"`
 }
 
 func (s *Server) formatCastTarget(ctx context.Context, _ *mcp.CallToolRequest, in castTargetInput) (*mcp.CallToolResult, castTargetOutput, error) {
 	_ = ctx
-	if in.VideoID == "" {
+	id := strings.TrimSpace(in.VideoID)
+	if id == "" {
 		return toolError("videoId is required"), castTargetOutput{}, nil
 	}
 	return nil, castTargetOutput{
-		VideoID:      in.VideoID,
-		VideoIDSnake: in.VideoID,
-		URL:          "https://www.youtube.com/watch?v=" + in.VideoID,
-		MusicURL:     "https://music.youtube.com/watch?v=" + in.VideoID,
-		CastHint:     "Call mcp-beam beam_youtube_video with arguments.video_id set to this video_id (11-char id). Do not pass url/musicUrl to beam_media.",
+		VideoID:      id,
+		VideoIDSnake: id,
+		URL:          youtube.WatchURL(id),
+		CastHint: "Pass video_id to your Cast/YouTube playback bridge " +
+			"(e.g. mcp-beam beam_youtube_video or cast__youtube_beam_video). " +
+			"Same handoff for a song or any video. Do not pass url as a generic media URL.",
 	}, nil
-}
-
-func trackDetailToOut(d *ytmusic.TrackDetail) trackDetailOut {
-	artists := make([]string, 0, len(d.Artists))
-	for _, a := range d.Artists {
-		if a.Name != "" {
-			artists = append(artists, a.Name)
-		}
-	}
-	return trackDetailOut{
-		trackOut: trackOut{
-			VideoID:    d.VideoID,
-			PlaylistID: d.PlaylistID,
-			Title:      d.Title,
-			Artists:    artists,
-			Duration:   d.Duration,
-			IsExplicit: d.IsExplicit,
-			URL:        "https://www.youtube.com/watch?v=" + d.VideoID,
-			MusicURL:   "https://music.youtube.com/watch?v=" + d.VideoID,
-		},
-		Album:     d.Album.Name,
-		Lyrics:    d.Lyrics,
-		HasLyrics: d.HasLyrics,
-	}
-}
-
-func trackToOut(t *ytmusic.TrackItem) trackOut {
-	artists := make([]string, 0, len(t.Artists))
-	for _, a := range t.Artists {
-		if a.Name != "" {
-			artists = append(artists, a.Name)
-		}
-	}
-	return trackOut{
-		VideoID:      t.VideoID,
-		VideoIDSnake: t.VideoID,
-		PlaylistID:   t.PlaylistID,
-		Title:        t.Title,
-		Artists:      artists,
-		Duration:     t.Duration,
-		IsExplicit:   t.IsExplicit,
-		URL:          "https://www.youtube.com/watch?v=" + t.VideoID,
-		MusicURL:     "https://music.youtube.com/watch?v=" + t.VideoID,
-	}
-}
-
-func playlistToOut(detail *ytmusic.PlaylistDetail) playlistOutput {
-	out := playlistOutput{
-		ID:         detail.ID,
-		Title:      detail.Title,
-		Author:     detail.Author,
-		TrackCount: detail.TrackCount,
-		Tracks:     make([]trackOut, 0, len(detail.Tracks)),
-	}
-	for _, t := range detail.Tracks {
-		if t == nil || t.VideoID == "" {
-			continue
-		}
-		out.Tracks = append(out.Tracks, trackToOut(t))
-	}
-	return out
 }
 
 func clampLimit(limit, defaultLimit, maxLimit int) int {
@@ -511,70 +345,55 @@ func toolErrFrom(err error) *mcp.CallToolResult {
 		if !strings.Contains(msg, ytmusic.AuthRefreshHint) {
 			msg += " | " + ytmusic.AuthRefreshHint
 		}
-	case errors.Is(err, ytmusic.ErrRateLimited):
-		msg += " | slow down or raise YTMUSIC_MIN_REQUEST_INTERVAL_MS / wait and retry"
-	case errors.Is(err, ytmusic.ErrAuthRequired):
-		msg += "; export headers from music.youtube.com and set YTMUSIC_HEADERS_PATH (docs/auth.md)"
+	case errors.Is(err, youtube.ErrAuthRequired), errors.Is(err, ytmusic.ErrAuthRequired):
+		msg += "; set YOUTUBE_OAUTH_PATH + client id/secret (docs/auth.md)"
+	case errors.Is(err, youtube.ErrAPI):
+		msg += " | check OAuth scopes, quota, and Data API enablement"
 	}
 	return toolError(msg)
 }
 
-// SelfTest runs a quick smoke check (auth presence + optional search).
-func SelfTest(client *ytmusic.Client) error {
-	if client == nil {
-		client = ytmusic.NewClient()
+// SelfTest runs Data API smokes (search + channel/likes) when OAuth is configured.
+func SelfTest(ym *ytmusic.Client) error {
+	if ym == nil {
+		ym = ytmusic.NewClient()
 	}
-	fmt.Fprintf(os.Stderr, "version=%s auth=%v oauth_path=%q headers_path=%q\n",
-		ServerVersion, client.Authenticated(), os.Getenv("YTMUSIC_OAUTH_PATH"), os.Getenv("YTMUSIC_HEADERS_PATH"))
+	oauthPath := ytmusic.EnvFirst(ytmusic.EnvOAuthPath, "YTMUSIC_OAUTH_PATH")
+	fmt.Fprintf(os.Stderr, "version=%s oauth_ready=%v oauth_path=%q\n",
+		ServerVersion, ym.OAuth != nil && ym.OAuth.Ready(), oauthPath)
 
-	result, err := client.TrackSearch("test").Next()
+	if ym.OAuth == nil || !ym.OAuth.Ready() {
+		return errors.New("self-test requires OAuth (set YOUTUBE_OAUTH_PATH + client id/secret)")
+	}
+
+	yt := youtube.New(ym.OAuth)
+	if ym.HTTPClient != nil {
+		yt.HTTPClient = ym.HTTPClient
+	}
+
+	hits, err := yt.SearchVideos(youtube.SearchOptions{Query: "test", MaxResults: 5})
 	if err != nil {
 		return fmt.Errorf("search smoke failed: %w", err)
 	}
-	n := len(result.Tracks)
-	fmt.Fprintf(os.Stderr, "search_smoke=ok tracks=%d\n", n)
-	if n == 0 {
-		return errors.New("search smoke returned zero tracks")
+	fmt.Fprintf(os.Stderr, "search_smoke=ok videos=%d\n", len(hits))
+	if len(hits) == 0 {
+		return errors.New("search smoke returned zero videos")
 	}
 
-	if !client.Authenticated() {
-		fmt.Fprintln(os.Stderr, "library_smoke=skipped (no auth)")
-		fmt.Fprintln(os.Stderr, "liked_smoke=skipped (no auth)")
-		fmt.Fprintln(os.Stderr, "history_smoke=skipped (no auth)")
-		return nil
-	}
-	return selfTestAuthed(client)
-}
-
-func selfTestAuthed(client *ytmusic.Client) error {
-	playlists, err := client.GetLibraryPlaylists(5)
+	probe, err := ym.ProbeDataAPI()
 	if err != nil {
-		return fmt.Errorf("library smoke failed: %w", err)
+		return fmt.Errorf("data API smoke failed: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "library_smoke=ok playlists=%d\n", len(playlists))
-	if len(playlists) > 0 {
-		b, _ := json.Marshal(playlists[0])
-		fmt.Fprintf(os.Stderr, "sample_playlist=%s\n", b)
+	fmt.Fprintf(os.Stderr, "data_api_smoke=ok channel=%q liked_videos=%d music_category=%d\n",
+		probe.ChannelTitle, probe.LikedVideos, probe.MusicCategoryN)
+	if probe.LikedSample != "" {
+		fmt.Fprintf(os.Stderr, "sample_liked=%q\n", probe.LikedSample)
 	}
-
-	liked, err := client.GetLikedSongs(5)
-	if err != nil {
-		return fmt.Errorf("liked songs smoke failed: %w", err)
+	if probe.Hint != "" {
+		fmt.Fprintf(os.Stderr, "hint=%s\n", probe.Hint)
 	}
-	fmt.Fprintf(os.Stderr, "liked_smoke=ok title=%q tracks=%d\n", liked.Title, len(liked.Tracks))
-	if len(liked.Tracks) > 0 {
-		b, _ := json.Marshal(trackToOut(liked.Tracks[0]))
-		fmt.Fprintf(os.Stderr, "sample_liked=%s\n", b)
-	}
-
-	history, err := client.GetHistory(5)
-	if err != nil {
-		return fmt.Errorf("history smoke failed: %w", err)
-	}
-	fmt.Fprintf(os.Stderr, "history_smoke=ok tracks=%d\n", len(history))
-	if len(history) > 0 {
-		b, _ := json.Marshal(history[0])
-		fmt.Fprintf(os.Stderr, "sample_history=%s\n", b)
+	if probe.ChannelID == "" {
+		return errors.New("data API smoke: channels.list returned no channel")
 	}
 	return nil
 }

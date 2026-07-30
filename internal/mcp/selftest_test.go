@@ -1,9 +1,10 @@
 package mcp
 
 import (
-	"io"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -11,256 +12,85 @@ import (
 	"github.com/shotah/youtube-go-mcp/internal/ytmusic"
 )
 
-func TestSelfTestUnauthedSearch(t *testing.T) {
-	searchBody := `{
-	  "contents": {
-	    "tabbedSearchResultsRenderer": {
-	      "tabs": [{
-	        "tabRenderer": {
-	          "content": {
-	            "sectionListRenderer": {
-	              "contents": [{
-	                "itemSectionRenderer": {
-	                  "contents": [{
-	                    "musicResponsiveListItemRenderer": {
-	                      "playlistItemData": {"videoId": "track1"},
-	                      "flexColumns": [
-	                        {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
-	                          {"text": "Song One", "navigationEndpoint": {"watchEndpoint": {"videoId": "track1"}}}
-	                        ]}}},
-	                        {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
-	                          {"text": "Artist", "navigationEndpoint": {"browseEndpoint": {
-	                            "browseId": "UCa",
-	                            "browseEndpointContextSupportedConfigs": {
-	                              "browseEndpointContextMusicConfig": {"pageType": "MUSIC_PAGE_TYPE_ARTIST"}
-	                            }
-	                          }}}
-	                        ]}}}
-	                      ],
-	                      "overlay": {
-	                        "musicItemThumbnailOverlayRenderer": {
-	                          "content": {
-	                            "musicPlayButtonRenderer": {
-	                              "playNavigationEndpoint": {
-	                                "watchEndpoint": {
-	                                  "watchEndpointMusicSupportedConfigs": {
-	                                    "watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_ATV"}
-	                                  }
-	                                }
-	                              }
-	                            }
-	                          }
-	                        }
-	                      }
-	                    }
-	                  }]
-	                }
-	              }]
-	            }
-	          }
-	        }
-	      }]
-	    }
-	  }
-	}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "/search") {
-			http.Error(w, "unexpected "+r.URL.Path, http.StatusBadRequest)
-			return
-		}
-		_, _ = io.ReadAll(r.Body)
+func TestSelfTestRequiresOAuth(t *testing.T) {
+	c := ytmusic.NewClient()
+	c.OAuth = nil
+	if err := SelfTest(c); err == nil {
+		t.Fatal("expected oauth required")
+	}
+}
+
+func TestSelfTestOAuthDataAPI(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(searchBody))
+		switch {
+		case strings.Contains(r.URL.Path, "/search"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{
+					"id":      map[string]string{"videoId": "searchvid01"},
+					"snippet": map[string]string{"title": "Hit"},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "tokeninfo") || strings.Contains(r.URL.RawQuery, "access_token="):
+			_ = json.NewEncoder(w).Encode(map[string]string{"scope": "https://www.googleapis.com/auth/youtube"})
+		case strings.Contains(r.URL.Path, "/channels"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{
+					"id": "UCme", "snippet": map[string]string{"title": "Me"},
+					"contentDetails": map[string]any{
+						"relatedPlaylists": map[string]string{"likes": "LL", "uploads": "UU"},
+					},
+				}},
+			})
+		case strings.Contains(r.URL.Path, "/videos"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []map[string]any{{
+					"id": "liked1", "snippet": map[string]string{"title": "Liked", "categoryId": "10"},
+					"contentDetails": map[string]string{"duration": "PT1M"},
+				}},
+			})
+		default:
+			http.Error(w, "unexpected "+r.URL.String(), http.StatusBadRequest)
+		}
 	}))
-	t.Cleanup(srv.Close)
+	t.Cleanup(api.Close)
 
 	client := ytmusic.NewClient()
 	client.HTTPClient = &http.Client{
 		Timeout:   5 * time.Second,
-		Transport: rewriteMusicHost{base: srv.URL},
+		Transport: roundTripAllHosts{base: api.URL},
 	}
-	client.Sleep = func(time.Duration) {}
-	client.MinRequestInterval = 0
-	client.MaxRetries = 0
-	client.Auth = nil
-	client.OAuth = nil
+	client.OAuth = &ytmusic.OAuthSession{
+		Credentials: ytmusic.OAuthCredentials{ClientID: "c", ClientSecret: "s"},
+		Token: &ytmusic.OAuthToken{
+			AccessToken:  "tok",
+			RefreshToken: "ref",
+			TokenType:    "Bearer",
+			ExpiresAt:    time.Now().Add(time.Hour).Unix(),
+		},
+		Now: time.Now,
+	}
 
 	if err := SelfTest(client); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestSelfTestAuthed(t *testing.T) {
-	libraryBody := `{
-	  "contents": {
-	    "singleColumnBrowseResultsRenderer": {
-	      "tabs": [{
-	        "tabRenderer": {
-	          "content": {
-	            "sectionListRenderer": {
-	              "contents": [{
-	                "gridRenderer": {
-	                  "items": [{
-	                    "musicTwoRowItemRenderer": {
-	                      "title": {"runs": [{"text": "Road Trip"}]},
-	                      "navigationEndpoint": {"browseEndpoint": {"browseId": "VLPLABCDEF"}}
-	                    }
-	                  }]
-	                }
-	              }]
-	            }
-	          }
-	        }
-	      }]
-	    }
-	  }
-	}`
-	playlistBody := `{
-	  "contents": {
-	    "twoColumnBrowseResultsRenderer": {
-	      "tabs": [{
-	        "tabRenderer": {
-	          "content": {
-	            "sectionListRenderer": {
-	              "contents": [{
-	                "musicResponsiveHeaderRenderer": {
-	                  "title": {"runs": [{"text": "Liked"}]},
-	                  "secondSubtitle": {"runs": [{"text": "1 song"}]}
-	                }
-	              }]
-	            }
-	          }
-	        }
-	      }],
-	      "secondaryContents": {
-	        "sectionListRenderer": {
-	          "contents": [{
-	            "musicPlaylistShelfRenderer": {
-	              "contents": [{
-	                "musicResponsiveListItemRenderer": {
-	                  "playlistItemData": {"videoId": "liked1"},
-	                  "flexColumns": [
-	                    {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{
-	                      "text": "Fav",
-	                      "navigationEndpoint": {"watchEndpoint": {"videoId": "liked1"}}
-	                    }]}}}
-	                  ]
-	                }
-	              }]
-	            }
-	          }]
-	        }
-	      }
-	    }
-	  }
-	}`
-	historyBody := `{
-	  "contents": {
-	    "singleColumnBrowseResultsRenderer": {
-	      "tabs": [{
-	        "tabRenderer": {
-	          "content": {
-	            "sectionListRenderer": {
-	              "contents": [{
-	                "musicShelfRenderer": {
-	                  "title": {"runs": [{"text": "Today"}]},
-	                  "contents": [{
-	                    "musicResponsiveListItemRenderer": {
-	                      "playlistItemData": {"videoId": "hist1"},
-	                      "flexColumns": [
-	                        {"musicResponsiveListItemFlexColumnRenderer": {
-	                          "text": {"runs": [{"text": "Song A", "navigationEndpoint": {"watchEndpoint": {"videoId": "hist1"}}}]}
-	                        }}
-	                      ]
-	                    }
-	                  }]
-	                }
-	              }]
-	            }
-	          }
-	        }
-	      }]
-	    }
-	  }
-	}`
-	searchBody := `{
-	  "contents": {
-	    "tabbedSearchResultsRenderer": {
-	      "tabs": [{
-	        "tabRenderer": {
-	          "content": {
-	            "sectionListRenderer": {
-	              "contents": [{
-	                "itemSectionRenderer": {
-	                  "contents": [{
-	                    "musicResponsiveListItemRenderer": {
-	                      "playlistItemData": {"videoId": "track1"},
-	                      "flexColumns": [
-	                        {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [
-	                          {"text": "Song One", "navigationEndpoint": {"watchEndpoint": {"videoId": "track1"}}}
-	                        ]}}}
-	                      ],
-	                      "overlay": {
-	                        "musicItemThumbnailOverlayRenderer": {
-	                          "content": {
-	                            "musicPlayButtonRenderer": {
-	                              "playNavigationEndpoint": {
-	                                "watchEndpoint": {
-	                                  "watchEndpointMusicSupportedConfigs": {
-	                                    "watchEndpointMusicConfig": {"musicVideoType": "MUSIC_VIDEO_TYPE_ATV"}
-	                                  }
-	                                }
-	                              }
-	                            }
-	                          }
-	                        }
-	                      }
-	                    }
-	                  }]
-	                }
-	              }]
-	            }
-	          }
-	        }
-	      }]
-	    }
-	  }
-	}`
+type roundTripAllHosts struct {
+	base string
+}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		body := string(raw)
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case strings.Contains(r.URL.Path, "/search"):
-			_, _ = w.Write([]byte(searchBody))
-		case strings.Contains(body, "FEmusic_liked_playlists"):
-			_, _ = w.Write([]byte(libraryBody))
-		case strings.Contains(body, "FEmusic_history"):
-			_, _ = w.Write([]byte(historyBody))
-		case strings.Contains(body, "VLLM") || strings.Contains(body, "VLPL"):
-			_, _ = w.Write([]byte(playlistBody))
-		default:
-			http.Error(w, "unexpected "+r.URL.Path+" "+body, http.StatusBadRequest)
-		}
-	}))
-	t.Cleanup(srv.Close)
-
-	client := ytmusic.NewClient()
-	client.HTTPClient = &http.Client{
-		Timeout:   5 * time.Second,
-		Transport: rewriteMusicHost{base: srv.URL},
+func (t roundTripAllHosts) RoundTrip(req *http.Request) (*http.Response, error) {
+	base, err := url.Parse(strings.TrimRight(t.base, "/"))
+	if err != nil {
+		return nil, err
 	}
-	client.Sleep = func(time.Duration) {}
-	client.MinRequestInterval = 0
-	client.MaxRetries = 0
-	client.Auth = &ytmusic.BrowserAuth{
-		Cookie:   "VISITOR=1; __Secure-3PAPISID=x",
-		SAPISID:  "x",
-		AuthUser: "0",
-	}
-
-	if err := SelfTest(client); err != nil {
-		t.Fatal(err)
-	}
+	orig := *req.URL
+	req = req.Clone(req.Context())
+	req.URL.Scheme = base.Scheme
+	req.URL.Host = base.Host
+	req.URL.Path = orig.Path
+	req.URL.RawQuery = orig.RawQuery
+	req.Host = base.Host
+	return http.DefaultTransport.RoundTrip(req)
 }

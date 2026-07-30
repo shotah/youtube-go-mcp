@@ -1,176 +1,177 @@
-# youtube-go-mcp — build plan
+# youtube-go-mcp — YouTube MCP pivot
 
-Working board for turning this repo (seeded from [raitonoberu/ytmusic](https://github.com/raitonoberu/ytmusic)) into a **static Go** YouTube Music MCP that an AI agent can use with Cast / Nest (or similar playback bridges).
+Working board (fresh). Prior Music/InnerTube phases are **done / closed**; this doc maps the move to a real **YouTube Data API v3** MCP.
 
-**Related:** a Cast companion example is [mcp-beam](https://github.com/shotah/mcp-beam). This MCP sources tracks; Cast (or another player MCP) plays them.
+**Why:** InnerTube (`youtubei/v1`) rejects durable OAuth Bearer for Music library; cookie replay is fragile for always-on agents. Official Data API v3 + refreshable OAuth is the long-lived path. Same `videoId` still casts via whatever player bridge you use (mcp-beam, another Cast sender, Assistant, manual) — now **any** YouTube video, not only Music catalog.
 
----
-
-## Current state
-
-- [x] Seed repo with ytmusic Go client (search, watch playlist, lyrics, suggestions)
-- [x] Rebrand module path away from `github.com/raitonoberu/ytmusic` → `github.com/shotah/youtube-go-mcp`
-- [x] Bump Go version (seed is `go 1.16`; now `go 1.26.0`)
-- [x] Refresh InnerTube `clientVersion` / headers (seed last touched ~2024 — expect breakage)
+**Music stays in scope as a use case.** We ditch InnerTube, not music. Anything we can honestly pull from Data API v3 for taste / music discovery, we explore and keep. Prefer `youtube.com/watch?v=…`; optional `musicUrl` as a convenience link when content looks like music.
 
 ---
 
-## Phase 0 — Repo hygiene
+## North star
 
-- [x] `go.mod` module rename + tidy
-- [x] Split packages: keep client as `ytmusic/` (or `internal/ytmusic`), MCP under `cmd/youtube-go-mcp` + `internal/mcp`
-- [x] README rewrite (this is an MCP + client, not just a search lib)
-- [x] `.gitignore` for auth artifacts (`headers.json`, cookies, tokens)
-- [x] CI: `go test ./...`, golangci-lint, GoReleaser on `v*` tags
-- [x] Make / Dockerfile for static binary (`CGO_ENABLED=0`)
-
----
-
-## Phase 1 — Auth (Premium session)
-
-Premium rides on **your Google account session**, not a special Music API key.
-
-- [x] `BrowserAuth` from exported cookies / headers JSON (`cookie` + `x-goog-authuser`)
-- [x] Compute `SAPISIDHASH` Authorization header (same model as Python `ytmusicapi`)
-- [x] Attach auth to all InnerTube requests when configured
-- [x] Clear errors: `AuthRequired`, `InvalidAuth`, expired cookie guidance
-- [x] One-shot auth helper CLI: `youtube-go-mcp auth` (print instructions + validate headers)
-- [x] Document cookie export flow (browser DevTools → music.youtube.com) — never commit secrets
-- [x] Optional: env `YTMUSIC_HEADERS_PATH` / mount path (e.g. `secrets/ytmusic/headers.json`)
-
----
-
-## Phase 2 — Client APIs (library beyond search)
-
-Build on authenticated client (port shapes from Python `ytmusicapi` as needed):
-
-- [x] `GetLibraryPlaylists`
-- [x] `GetPlaylist(id)` (+ pagination)
-- [x] `GetLikedSongs` / library songs
-- [x] `GetHistory` (same trust model as liked songs — local agent)
-- [x] `Search` hardened with auth (better personalization / Music catalog)
-- [x] `GetWatchPlaylist` / radio seed from `videoId` (radio / continuum)
-- [x] Return stable IDs an AI agent can cast: `videoId`, optional `playlistId`, title, artists, duration
-- [x] Unit tests with recorded fixtures (no live cookies in CI)
-
-**Out of scope for v1:** playlist mutate (create/add/delete), likes write — add later if needed.
-
----
-
-## Phase 3 — MCP server (stdio)
-
-Thin MCP over the client — keep the AI agent tool surface small.
-
-### v1 tools (renamed — see MCP tool rename below)
-
-- [x] `tracks_search` — query → list of tracks (`videoId`, title, artists, …)
-- [x] `library_list_playlists`
-- [x] `playlists_get` — playlist id → tracks
-- [x] `library_list_liked_songs` (limit)
-- [x] `library_list_history` (limit)
-- [x] `tracks_list_watch_playlist` / radio from a seed `videoId`
-- [x] `tracks_get` / `tracks_get_lyrics` (lyrics when YTM exposes them)
-
-### server plumbing
-
-- [x] stdio MCP via `github.com/modelcontextprotocol/go-sdk`
-- [x] `--version` / `--self-test` (auth present? search smoke?)
-- [x] Structured errors an AI agent can act on
-- [x] Logging to stderr only (never stdout — stdio protocol)
-
----
-
-## Phase 4 — Playback bridge (don’t strand the agent on royalty-free MP3s)
-
-Search alone is not enough. Nest / Cast needs a path that understands YouTube.
-
-- [x] Document contract: this MCP returns `videoId` + `https://music.youtube.com/watch?v=…` / `youtube.com/watch?v=…`
-- [x] Coordinate with a Cast MCP (e.g. mcp-beam / go2tv): **cast by video ID** (YouTube receiver), not only raw media URLs — mcp-beam `beam_youtube_video`
-- [x] Guidance: do not invent free-MP3 fallbacks; pass `videoId` to `beam_youtube_video` (not Music watch URLs to `beam_media`)
-- [x] Optional helper tool: `cast_format_target(videoId)` → payload Cast expects
-
----
-
-## Phase 5 — Wire into an AI agent host
-
-- [x] Dockerfile stage in `docker_open_claw`: fetch release → `/usr/local/bin/youtube-go-mcp`
-- [x] MCP server / bundle config + grant on the main agent (`ytmusic`)
-- [x] Compose: mount `secrets/ytmusic/`, `YTMUSIC_HEADERS_PATH`
-- [x] Host docs: `docker_open_claw/docs/ytmusic.md` + `make ytmusic-auth`
-- [x] Agent tools doc: search → pick track → Cast to a room / device
-- [x] Pin via `YOUTUBE_GO_MCP_VERSION` (default `v0.0.2` in Tim)
-
----
-
-## Phase 6 — Hardening
-
-- [x] Rate-limit / backoff on InnerTube 429s
-- [x] Client version config (env override without rebuild)
-- [x] Cookie refresh docs when Premium session dies
-- [x] OAuth device flow (`auth oauth`) + auto refresh + `YTMUSIC_OAUTH_*` env
-- [x] Release binaries (GoReleaser on `v*` tags)
-
----
-
-## Decisions / notes
-
-| Topic | Decision |
+| Pillar | Decision |
 |---|---|
-| Language | Go only (static binary for distroless agent hosts) |
-| Auth | OAuth device flow + refresh (preferred); browser cookies as legacy fallback |
-| Official Data API | Skip for Music library; may use later only if needed for something else |
-| Cast | Separate MCP (e.g. mcp-beam); this repo sources identity + IDs |
-| Python rewrite | No — expand this client instead |
+| Product | **YouTube MCP** (search, library-ish reads, metadata) for AI agents |
+| Backend | YouTube **Data API v3** only — **ditch InnerTube v1** entirely |
+| Auth | OAuth device/TV flow + **refresh token** (long-lived). Drop browser cookies / SAPISIDHASH |
+| Cast | Return castable `videoId` (+ `video_id` / `url`); playback bridge is pluggable (not required to be mcp-beam) |
+| Music | **Keep an eye on** — extract what v3 allows (likes, category/Topic filters, music-leaning search); never reintroduce InnerTube for it |
+| Tool naming | **Hard requirement** — follow shared contract (link below). Qwen closest-match must not guess. |
+| Binary / module name | Keep `youtube-go-mcp` for now; rebrand docs/tools language to YouTube |
 
 ---
 
-## Immediate next (when we work here)
+## MCP naming (locked — do not freestyle)
 
-1. ~~Module rename + package layout (`cmd/` + `internal/ytmusic`)~~
-2. ~~Browser auth + one authenticated smoke (`GetLibraryPlaylists`)~~
-3. ~~Minimal MCP: `tracks_search` + `library_list_playlists` over stdio~~
-4. ~~Wire into Tim (`docker_open_claw`)~~ — Cast video-ID handoff still open
-5. ~~`GetPlaylist` / `GetLikedSongs` + matching MCP tools~~
+**Canonical doc:** [ai-gantry `docs/mcp-naming.md`](https://github.com/shotah/ai-gantry/blob/main/docs/mcp-naming.md)
+
+Hosts expose `{server_id}__{tool}`. Server id in ai-gantry stays **`youtube`**.
+
+| Rule | This package |
+| --- | --- |
+| `{service}_{verb}_{object…}` | Yes |
+| Never `youtube_` on the tool | Host already makes `youtube__…` |
+| Stable verbs | `search`, `list`, `get`, `format` |
+| Data API era noun | **`videos_`** (not Music/InnerTube `tracks_`) |
+| Shared nouns | `playlists_`, `library_`, `cast_` (handoff only; playback stays mcp-beam) |
+| Descriptions | Lead with agent intent (“Search YouTube videos…”) |
+| Tests | No server-id prefix; assert registered names |
+
+**Locked host forms after Phase C:**
+
+| Tool | Host call |
+| --- | --- |
+| `videos_search` | `youtube__videos_search` |
+| `videos_get` | `youtube__videos_get` |
+| `playlists_get` | `youtube__playlists_get` |
+| `library_list_playlists` | `youtube__library_list_playlists` |
+| `library_list_liked_videos` | `youtube__library_list_liked_videos` |
+| `cast_format_target` | `youtube__cast_format_target` |
+
+Cast playback remains **`cast__youtube_beam_video`** / `cast__devices_list` on
+server `cast` — do not re-home beam tools into this binary.
 
 ---
 
-## Smoke checklist (later)
+## Closed (do not reopen)
 
-```bash
-go test ./...
-go build -o bin/youtube-go-mcp ./cmd/youtube-go-mcp
-./bin/youtube-go-mcp --self-test
-# With headers.json mounted:
-# ask the AI agent: "search YouTube Music for …" / "list my Music playlists"
-```
+- [x] Music InnerTube client + MCP v1 tools (search, library, likes, history, radio, lyrics)
+- [x] Browser cookie auth + OAuth device flow plumbing
+- [x] Visitor-id / probe / Brand Account investigation — OAuth + InnerTube library is a dead end
+- [x] Host wiring, CI, coverage gate, releases through `v0.2.2`
 
 ---
 
-## MCP tool rename (`{service}_{verb}_{object}`)
+## Phase A — Product + auth contract
 
-**Status:** done in-repo (ship on next release)  
-**Why:** Hosts expose `{server}__{tool}` (ai-gantry server id = `youtube`).
-Matches the google-mcp pattern.
+- [x] Rewrite mental model in README / `docs/auth.md`: YouTube Data API v3 + OAuth refresh; InnerTube/cookies deprecated
+- [x] Env naming: prefer `YOUTUBE_OAUTH_*`, legacy `YTMUSIC_OAUTH_*` aliases still work
+- [x] Scopes: mint `youtube`; document `youtube.readonly` as read-only remint option
+- [x] Quota story: daily quota, pagination, backoff on 403 rateLimitExceeded (docs/auth.md)
+- [x] Self-test / `--probe-data-api`: OAuth refresh + `channels.list?mine=true` + `videos.list?myRating=like`
 
-**Rule:** Do **not** prefix tools with `youtube_` — the server id already does.
-Use services: `tracks`, `playlists`, `library`, `cast`.
+---
 
-| Old | New | Host after |
-| --- | --- | --- |
-| `search_tracks` | `tracks_search` | `youtube__tracks_search` |
-| `get_library_playlists` | `library_list_playlists` | `youtube__library_list_playlists` |
-| `get_playlist` | `playlists_get` | `youtube__playlists_get` |
-| `get_liked_songs` | `library_list_liked_songs` | `youtube__library_list_liked_songs` |
-| `get_history` | `library_list_history` | `youtube__library_list_history` |
-| `get_watch_playlist` | `tracks_list_watch_playlist` | `youtube__tracks_list_watch_playlist` |
-| `get_track` | `tracks_get` | `youtube__tracks_get` |
-| `get_lyrics` | `tracks_get_lyrics` | `youtube__tracks_get_lyrics` |
-| `format_cast_target` | `cast_format_target` | `youtube__cast_format_target` |
+## Phase B — Data API client (replace InnerTube)
+
+Package: `internal/youtube` (OAuth via `TokenSource`; `ytmusic.OAuthSession.BearerToken` implements it).
+
+- [x] HTTP client: `googleapis.com/youtube/v3/*` + Bearer from existing OAuth refresh
+- [x] `ChannelMine` — identity (title, id, `relatedPlaylists.likes` / uploads)
+- [x] `SearchVideos` — `q`, `type=video`, optional `MusicOnly` → `videoCategoryId=10`
+- [x] `GetVideo` / `GetVideos` / `ListLikedVideos` — by id + `myRating=like`
+- [x] `ListMyPlaylists` / `ListPlaylistItems` — mine + by playlist id
+- [x] Agent-friendly structs: `videoId`, title, channel, duration, `url`, optional `musicUrl`
+- [x] Unit tests with httptest fixtures (no live token in CI)
+- [x] `ProbeDataAPI` delegates to `internal/youtube`
+- [x] **Hard delete** InnerTube + browser cookie auth (`ytmusic` is OAuth/WhoAmI/probe only)
+
+---
+
+## Phase C — MCP tool surface (YouTube-shaped)
+
+Follow [mcp-naming.md](https://github.com/shotah/ai-gantry/blob/main/docs/mcp-naming.md).
+**Decision locked:** `tracks_*` → `videos_*` (Data API honesty + matching).
+
+### Keep / reshape (old Music → new)
+
+| Old (InnerTube / Music) | New tool | Host after | Direction |
+|---|---|---|---|
+| `tracks_search` | `videos_search` | `youtube__videos_search` | Data API `search.list`; optional `musicOnly` / `videoCategoryId=10` |
+| `tracks_get` | `videos_get` | `youtube__videos_get` | `videos.list` by id |
+| `playlists_get` | `playlists_get` | `youtube__playlists_get` | `playlistItems` by `PL…` |
+| `library_list_playlists` | `library_list_playlists` | `youtube__library_list_playlists` | `playlists.list?mine=true` |
+| `library_list_liked_songs` | `library_list_liked_videos` | `youtube__library_list_liked_videos` | `videos.list?myRating=like` (or `LL`) |
+| `cast_format_target` | `cast_format_target` | `youtube__cast_format_target` | Any `videoId`; player-agnostic hint |
 
 Checklist:
 
-- [x] Rename MCP tool registrations
-- [x] Update README / self-test docs
-- [x] Tests
-- [x] Release; update ai-gantry `TOOLS.md` + host `mcp.toml` server id `youtube` (`v0.1.0` on host; cast handoff still uses video ids)
+- [x] Register only the **new** names (no dual aliases)
+- [x] Tool descriptions lead with intent (see mcp-naming.md)
+- [x] Name assertion tests (no `youtube_` tool prefix)
+- [ ] ai-gantry `TOOLS.md` / docs: `youtube__tracks_*` → `youtube__videos_*` in same consumer change (**host repo**)
 
+### Dropped (InnerTube-only)
+
+| Old tool | Why |
+|---|---|
+| `library_list_history` | Watch/Music history not in Data API |
+| `tracks_list_watch_playlist` | InnerTube radio |
+| `tracks_get_lyrics` | Music InnerTube lyrics |
+
+### Agent flows to support
+
+1. Search (optionally music-leaning) → pick `videoId` → cast via chosen bridge  
+2. List liked videos → filter/suggest music-ish → cast  
+3. List my playlists → get items → cast  
+4. Resolve metadata for any `videoId` (essay, MV, clip — all fair game)
+
+---
+
+## Phase D — Cast (pluggable) + music-friendly output
+
+- [x] Docs: this MCP **sources** IDs; casting is separate — [docs/cast.md](docs/cast.md) + README
+- [x] Outputs always include cast-ready fields (`videoId`, `video_id`, `url`)
+- [x] Optional `musicUrl` when content looks like music — never required for playback (`cast_format_target` omits it)
+- [x] Host/agent examples: “play this video” and “play this song” share the same `videoId` handoff
+
+---
+
+## Phase E — Music via Data API (keep an eye on)
+
+Not a second backend — thin helpers on top of v3 ([docs/music.md](docs/music.md)):
+
+- [x] Taste signal via `--probe-data-api` (`likedVideos` + `likedMusicCategoryCount`) — live account varies
+- [x] Music-leaning heuristics: category 10, `… - Topic`, Official Audio / Provided to YouTube / lyrics / visualizer hints
+- [x] Enrich rows: `categoryId`, `channelTitle`, `durationSec`, `musicLikely`, optional `musicUrl`
+- [x] `musicOnly=true` on `videos_search` and `library_list_liked_videos`
+
+---
+
+## Phase F — Cutover + release
+
+- [x] Default binary: Data API v3 only (InnerTube gone)
+- [x] `--self-test` / `auth oauth --whoami` / `--probe-data-api`
+- [x] README: YouTube · MCP · Cast; music as use case on v3
+- [ ] Semver note for breaking tool renames (`v0.3.0` or `v1.0.0`)
+- [ ] Host updates: ai-gantry `TOOLS.md` + OAuth-only env (`youtube__videos_*`)
+- [ ] Smoke: cast a music video **and** a non-music video through whatever player you use
+
+---
+
+## Immediate next
+
+1. Update ai-gantry `TOOLS.md` / host mcp config for `youtube__videos_*` (breaking rename)  
+2. Cut release when host is ready  
+3. Phase E music filters as needed (optional)
+
+---
+
+## Open questions
+
+1. Rename binary/module eventually (`youtube-mcp`) or keep `youtube-go-mcp`?  
+2. ~~`tracks_*` vs `videos_*`~~ — **locked: `videos_*`** (mcp-naming.md + table above).  
+3. Default search: all of YouTube, or music-leaning with opt-out?  
+4. Write tools later (`videos.rate`, playlist mutate) — after read path is solid?  
+5. ~~Shared naming doc?~~ — **yes:** [ai-gantry/docs/mcp-naming.md](https://github.com/shotah/ai-gantry/blob/main/docs/mcp-naming.md)  
