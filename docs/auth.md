@@ -1,6 +1,6 @@
 # Browser auth & cookie refresh
 
-YouTube Music library tools (`get_library_playlists`, `get_liked_songs`, private playlists) use your **browser session**, not a Google API key.
+YouTube Music library tools (`library_list_playlists`, `library_list_liked_songs`, private playlists via `playlists_get`) use your **browser session**, not a Google API key.
 
 ## One-time setup
 

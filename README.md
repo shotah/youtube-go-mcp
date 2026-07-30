@@ -12,15 +12,18 @@ Seeded from [raitonoberu/ytmusic](https://github.com/raitonoberu/ytmusic); rebra
 
 | Tool | Auth | Description |
 |---|---|---|
-| `search_tracks` | optional | Query → tracks with `videoId`, artists, cast URLs |
-| `get_library_playlists` | required | Signed-in library playlists |
-| `get_playlist` | depends | Playlist id → tracks (`LM` = Liked Songs) |
-| `get_liked_songs` | required | Liked Songs for taste-aware suggestions |
-| `get_history` | required | Recent listening history (with “Today” / “Yesterday” labels) |
-| `get_watch_playlist` | optional | Radio / continuum from a seed `videoId` |
-| `get_track` | optional | Track metadata; optional lyrics for song understanding |
-| `get_lyrics` | optional | Plain-text lyrics when YouTube Music provides them |
-| `format_cast_target` | no | `videoId` / `video_id` + URLs + hint for mcp-beam `beam_youtube_video` |
+| `tracks_search` | optional | Query → tracks with `videoId`, artists, cast URLs |
+| `library_list_playlists` | required | Signed-in library playlists |
+| `playlists_get` | depends | Playlist id → tracks (`LM` = Liked Songs) |
+| `library_list_liked_songs` | required | Liked Songs for taste-aware suggestions |
+| `library_list_history` | required | Recent listening history (with “Today” / “Yesterday” labels) |
+| `tracks_list_watch_playlist` | optional | Radio / continuum from a seed `videoId` |
+| `tracks_get` | optional | Track metadata; optional lyrics for song understanding |
+| `tracks_get_lyrics` | optional | Plain-text lyrics when YouTube Music provides them |
+| `cast_format_target` | no | `videoId` / `video_id` + URLs + hint for mcp-beam `beam_youtube_video` |
+
+Naming follows `{service}_{verb}_{object}` (same as google-mcp). On a host with server
+id `youtube`, tools appear as e.g. `youtube__tracks_search`.
 
 ## Build
 

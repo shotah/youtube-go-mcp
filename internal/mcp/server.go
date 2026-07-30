@@ -36,6 +36,36 @@ func New(client *ytmusic.Client) *Server {
 	}
 }
 
+// Tool names follow google-mcp style: {service}_{verb}_{object}.
+// Hosts expose them as {server}__{tool} (ai-gantry server id = youtube).
+// Do not prefix with youtube_ — the server id already does.
+const (
+	ToolTracksSearch            = "tracks_search"
+	ToolLibraryListPlaylists    = "library_list_playlists"
+	ToolPlaylistsGet            = "playlists_get"
+	ToolLibraryListLikedSongs   = "library_list_liked_songs"
+	ToolLibraryListHistory      = "library_list_history"
+	ToolTracksListWatchPlaylist = "tracks_list_watch_playlist"
+	ToolTracksGet               = "tracks_get"
+	ToolTracksGetLyrics         = "tracks_get_lyrics"
+	ToolCastFormatTarget        = "cast_format_target"
+)
+
+// RegisteredToolNames returns the MCP tool names in registration order.
+func RegisteredToolNames() []string {
+	return []string{
+		ToolTracksSearch,
+		ToolLibraryListPlaylists,
+		ToolPlaylistsGet,
+		ToolLibraryListLikedSongs,
+		ToolLibraryListHistory,
+		ToolTracksListWatchPlaylist,
+		ToolTracksGet,
+		ToolTracksGetLyrics,
+		ToolCastFormatTarget,
+	}
+}
+
 // Run starts the MCP server over stdio. Logs go to stderr only.
 func (s *Server) Run(ctx context.Context) error {
 	server := mcp.NewServer(&mcp.Implementation{
@@ -44,47 +74,47 @@ func (s *Server) Run(ctx context.Context) error {
 	}, nil)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "search_tracks",
+		Name:        ToolTracksSearch,
 		Description: "Search YouTube Music for tracks. Returns videoId, title, artists, duration, and cast-friendly URLs.",
 	}, s.searchTracks)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_library_playlists",
+		Name:        ToolLibraryListPlaylists,
 		Description: "List playlists from the authenticated YouTube Music library. Requires browser session headers.",
 	}, s.getLibraryPlaylists)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_playlist",
+		Name:        ToolPlaylistsGet,
 		Description: "Get tracks from a YouTube Music playlist by playlist id (PL…, RD…, or LM for Liked Songs).",
 	}, s.getPlaylist)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_liked_songs",
+		Name:        ToolLibraryListLikedSongs,
 		Description: "Get tracks from the authenticated user's Liked Songs. Useful for taste-aware suggestions. Requires browser session headers.",
 	}, s.getLikedSongs)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_history",
+		Name:        ToolLibraryListHistory,
 		Description: "Get recently played YouTube Music tracks (listening history) for continuity and suggestions. Requires browser session headers.",
 	}, s.getHistory)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_watch_playlist",
+		Name:        ToolTracksListWatchPlaylist,
 		Description: "Get a radio / continuum playlist seeded from a videoId.",
 	}, s.getWatchPlaylist)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_track",
+		Name:        ToolTracksGet,
 		Description: "Get metadata for a videoId (title, artists, duration, cast URLs). Set includeLyrics to also fetch lyrics when available — useful for understanding the song.",
 	}, s.getTrack)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "get_lyrics",
+		Name:        ToolTracksGetLyrics,
 		Description: "Get plain-text lyrics for a videoId when YouTube Music provides them. Returns available=false when the track has no lyrics.",
 	}, s.getLyrics)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "format_cast_target",
+		Name:        ToolCastFormatTarget,
 		Description: "Format a videoId into the payload Cast / Nest (or similar) integrations expect.",
 	}, s.formatCastTarget)
 
@@ -171,7 +201,7 @@ func (s *Server) getLibraryPlaylists(ctx context.Context, _ *mcp.CallToolRequest
 
 	playlists, err := s.Client.GetLibraryPlaylists(limit)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_library_playlists failed: %w", err)), libraryPlaylistsOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListPlaylists, err)), libraryPlaylistsOutput{}, nil
 	}
 
 	out := libraryPlaylistsOutput{Playlists: make([]libraryPlaylistOut, 0, len(playlists))}
@@ -207,7 +237,7 @@ func (s *Server) getPlaylist(ctx context.Context, _ *mcp.CallToolRequest, in get
 
 	detail, err := s.Client.GetPlaylist(in.PlaylistID, limit)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_playlist failed: %w", err)), playlistOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolPlaylistsGet, err)), playlistOutput{}, nil
 	}
 	return nil, playlistToOut(detail), nil
 }
@@ -225,7 +255,7 @@ func (s *Server) getLikedSongs(ctx context.Context, _ *mcp.CallToolRequest, in l
 
 	detail, err := s.Client.GetLikedSongs(limit)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_liked_songs failed: %w", err)), playlistOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListLikedSongs, err)), playlistOutput{}, nil
 	}
 	return nil, playlistToOut(detail), nil
 }
@@ -252,7 +282,7 @@ func (s *Server) getHistory(ctx context.Context, _ *mcp.CallToolRequest, in hist
 
 	items, err := s.Client.GetHistory(limit)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_history failed: %w", err)), historyOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolLibraryListHistory, err)), historyOutput{}, nil
 	}
 
 	out := historyOutput{Tracks: make([]historyTrackOut, 0, len(items))}
@@ -298,7 +328,7 @@ func (s *Server) getWatchPlaylist(ctx context.Context, _ *mcp.CallToolRequest, i
 
 	tracks, err := s.Client.GetWatchPlaylist(in.VideoID)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_watch_playlist failed: %w", err)), watchPlaylistOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksListWatchPlaylist, err)), watchPlaylistOutput{}, nil
 	}
 
 	out := watchPlaylistOutput{Tracks: make([]trackOut, 0, limit)}
@@ -334,7 +364,7 @@ func (s *Server) getTrack(ctx context.Context, _ *mcp.CallToolRequest, in getTra
 
 	detail, err := s.Client.GetTrack(in.VideoID, in.IncludeLyrics)
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_track failed: %w", err)), trackDetailOut{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksGet, err)), trackDetailOut{}, nil
 	}
 	return nil, trackDetailToOut(detail), nil
 }
@@ -360,7 +390,7 @@ func (s *Server) getLyrics(ctx context.Context, _ *mcp.CallToolRequest, in getLy
 		return nil, lyricsOutput{VideoID: in.VideoID, Available: false}, nil
 	}
 	if err != nil {
-		return toolErrFrom(fmt.Errorf("get_lyrics failed: %w", err)), lyricsOutput{}, nil
+		return toolErrFrom(fmt.Errorf("%s failed: %w", ToolTracksGetLyrics, err)), lyricsOutput{}, nil
 	}
 	return nil, lyricsOutput{
 		VideoID:   in.VideoID,

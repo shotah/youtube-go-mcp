@@ -61,15 +61,15 @@ Build on authenticated client (port shapes from Python `ytmusicapi` as needed):
 
 Thin MCP over the client — keep the AI agent tool surface small.
 
-### v1 tools
+### v1 tools (renamed — see MCP tool rename below)
 
-- [x] `search_tracks` — query → list of tracks (`videoId`, title, artists, …)
-- [x] `get_library_playlists`
-- [x] `get_playlist` — playlist id → tracks
-- [x] `get_liked_songs` (limit)
-- [x] `get_history` (limit)
-- [x] `get_watch_playlist` / radio from a seed `videoId`
-- [x] `get_track` / `get_lyrics` (lyrics when YTM exposes them)
+- [x] `tracks_search` — query → list of tracks (`videoId`, title, artists, …)
+- [x] `library_list_playlists`
+- [x] `playlists_get` — playlist id → tracks
+- [x] `library_list_liked_songs` (limit)
+- [x] `library_list_history` (limit)
+- [x] `tracks_list_watch_playlist` / radio from a seed `videoId`
+- [x] `tracks_get` / `tracks_get_lyrics` (lyrics when YTM exposes them)
 
 ### server plumbing
 
@@ -87,7 +87,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 - [x] Document contract: this MCP returns `videoId` + `https://music.youtube.com/watch?v=…` / `youtube.com/watch?v=…`
 - [x] Coordinate with a Cast MCP (e.g. mcp-beam / go2tv): **cast by video ID** (YouTube receiver), not only raw media URLs — mcp-beam `beam_youtube_video`
 - [x] Guidance: do not invent free-MP3 fallbacks; pass `videoId` to `beam_youtube_video` (not Music watch URLs to `beam_media`)
-- [x] Optional helper tool: `format_cast_target(videoId)` → payload Cast expects
+- [x] Optional helper tool: `cast_format_target(videoId)` → payload Cast expects
 
 ---
 
@@ -127,7 +127,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 
 1. ~~Module rename + package layout (`cmd/` + `internal/ytmusic`)~~
 2. ~~Browser auth + one authenticated smoke (`GetLibraryPlaylists`)~~
-3. ~~Minimal MCP: `search_tracks` + `get_library_playlists` over stdio~~
+3. ~~Minimal MCP: `tracks_search` + `library_list_playlists` over stdio~~
 4. ~~Wire into Tim (`docker_open_claw`)~~ — Cast video-ID handoff still open
 5. ~~`GetPlaylist` / `GetLikedSongs` + matching MCP tools~~
 
@@ -142,3 +142,34 @@ go build -o bin/youtube-go-mcp ./cmd/youtube-go-mcp
 # With headers.json mounted:
 # ask the AI agent: "search YouTube Music for …" / "list my Music playlists"
 ```
+
+---
+
+## MCP tool rename (`{service}_{verb}_{object}`)
+
+**Status:** done in-repo (ship on next release)  
+**Why:** Hosts expose `{server}__{tool}` (ai-gantry server id = `youtube`).
+Matches the google-mcp pattern.
+
+**Rule:** Do **not** prefix tools with `youtube_` — the server id already does.
+Use services: `tracks`, `playlists`, `library`, `cast`.
+
+| Old | New | Host after |
+| --- | --- | --- |
+| `search_tracks` | `tracks_search` | `youtube__tracks_search` |
+| `get_library_playlists` | `library_list_playlists` | `youtube__library_list_playlists` |
+| `get_playlist` | `playlists_get` | `youtube__playlists_get` |
+| `get_liked_songs` | `library_list_liked_songs` | `youtube__library_list_liked_songs` |
+| `get_history` | `library_list_history` | `youtube__library_list_history` |
+| `get_watch_playlist` | `tracks_list_watch_playlist` | `youtube__tracks_list_watch_playlist` |
+| `get_track` | `tracks_get` | `youtube__tracks_get` |
+| `get_lyrics` | `tracks_get_lyrics` | `youtube__tracks_get_lyrics` |
+| `format_cast_target` | `cast_format_target` | `youtube__cast_format_target` |
+
+Checklist:
+
+- [x] Rename MCP tool registrations
+- [x] Update README / self-test docs
+- [x] Tests
+- [ ] Release; update ai-gantry `TOOLS.md` + host `mcp.toml` server id `ytmusic` → `youtube` (cast handoff still uses video ids from tracks)
+
