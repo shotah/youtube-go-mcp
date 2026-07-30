@@ -83,9 +83,8 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 				request.Header.Set(k, v)
 			}
 		}
-		c.maybeReloadAuth()
-		if c.Auth != nil {
-			c.Auth.Apply(request, c.Now())
+		if err := c.applyAuth(request); err != nil {
+			return nil, err
 		}
 
 		response, err := c.HTTPClient.Do(request)
@@ -113,6 +112,11 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 		}
 
 		if isAuthFailureStatus(response.StatusCode) {
+			if c.OAuth != nil && c.OAuth.Ready() && attempt+1 < maxAttempts {
+				if err := c.OAuth.EnsureAccessToken(true); err == nil {
+					continue
+				}
+			}
 			// If the operator replaced headers.json after our last load, retry once with fresh cookies.
 			if c.reloadAuthIfChanged() && attempt+1 < maxAttempts {
 				continue
@@ -134,6 +138,20 @@ func (c *Client) makeRequest(endpoint string, body map[string]any, params url.Va
 		return nil, fmt.Errorf("%w: %s HTTP %d: %s", ErrRateLimited, endpoint, lastStatus, lastSnippet)
 	}
 	return nil, fmt.Errorf("ytmusic: %s returned HTTP %d: %s", endpoint, lastStatus, lastSnippet)
+}
+
+func (c *Client) applyAuth(req *http.Request) error {
+	if c == nil {
+		return nil
+	}
+	if c.OAuth != nil && c.OAuth.Ready() {
+		return c.OAuth.Apply(req)
+	}
+	c.maybeReloadAuth()
+	if c.Auth != nil {
+		c.Auth.Apply(req, c.Now())
+	}
+	return nil
 }
 
 func cloneValues(in url.Values) url.Values {

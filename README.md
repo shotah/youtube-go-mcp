@@ -4,6 +4,15 @@
 
 # youtube-go-mcp
 
+<p align="center">
+  <a href="https://github.com/shotah/youtube-go-mcp/actions/workflows/ci.yml"><img src="https://github.com/shotah/youtube-go-mcp/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/shotah/youtube-go-mcp/actions/workflows/release.yml"><img src="https://github.com/shotah/youtube-go-mcp/actions/workflows/release.yml/badge.svg" alt="Release"></a>
+  <a href="https://github.com/shotah/youtube-go-mcp/actions/workflows/ci.yml"><img src="https://github.com/shotah/youtube-go-mcp/raw/gh-pages/badges/coverage.svg" alt="Coverage"></a>
+  <a href="https://pkg.go.dev/github.com/shotah/youtube-go-mcp"><img src="https://pkg.go.dev/badge/github.com/shotah/youtube-go-mcp.svg" alt="Go Reference"></a>
+  <img src="https://img.shields.io/github/go-mod/go-version/shotah/youtube-go-mcp" alt="Go version">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/shotah/youtube-go-mcp" alt="License"></a>
+</p>
+
 Static Go [MCP](https://modelcontextprotocol.io) server for **YouTube Music** search and library reads. Built so an AI agent can source tracks for Cast / Nest (or similar) playback workflows: this MCP returns `videoId`s; a separate Cast MCP (e.g. [mcp-beam](https://github.com/shotah/mcp-beam)) can play them.
 
 Seeded from [raitonoberu/ytmusic](https://github.com/raitonoberu/ytmusic); rebranded and extended with browser auth + MCP tools.
@@ -43,23 +52,21 @@ make release BUMP=patch   # or TAG=v0.2.0
 
 ## Auth (Premium / library)
 
-Library tools need your browser session — not a YouTube Data API key.
+Library tools need a signed-in identity. **Prefer OAuth** (survives normal YouTube
+browser logins). Browser cookies still work but die easily when that session logs in again.
 
 ```bash
-./bin/youtube-go-mcp auth --out headers.json
-# prompts for cookie + x-goog-authuser (from DevTools → Network → browse → Request Headers)
-export YTMUSIC_HEADERS_PATH=$PWD/headers.json
+# Google Cloud: enable YouTube Data API v3 → OAuth client type "TVs and Limited Input devices"
+export YTMUSIC_OAUTH_CLIENT_ID='….apps.googleusercontent.com'
+export YTMUSIC_OAUTH_CLIENT_SECRET='…'
+./bin/youtube-go-mcp auth oauth --out oauth.json
+export YTMUSIC_OAUTH_PATH=$PWD/oauth.json
 ./bin/youtube-go-mcp --self-test
 ```
 
-1. Open [music.youtube.com](https://music.youtube.com) signed in
-2. DevTools → **Network** → filter `browse` → click **Library**
-3. Open the `browse` request → **Headers** → **Request Headers**
-4. Copy **`cookie`** and **`x-goog-authuser`** when the CLI prompts
+Legacy browser cookies: `youtube-go-mcp auth browser --out headers.json` + `YTMUSIC_HEADERS_PATH`.
 
-**Never commit `headers.json`.** Mount it as a secret when deploying (e.g. `secrets/ytmusic/headers.json`).
-
-When library tools start failing with `session expired` / HTTP 401–403, re-export headers and restart the MCP. Full refresh guide: [docs/auth.md](docs/auth.md).
+**Never commit `oauth.json` / `headers.json` / client secrets.** Full guide: [docs/auth.md](docs/auth.md).
 
 ### Rate limits
 
@@ -68,7 +75,10 @@ InnerTube calls are spaced (`YTMUSIC_MIN_REQUEST_INTERVAL_MS`, default `250`) an
 ## Run as MCP (stdio)
 
 ```bash
-YTMUSIC_HEADERS_PATH=/path/to/headers.json ./bin/youtube-go-mcp
+YTMUSIC_OAUTH_PATH=/path/to/oauth.json \
+YTMUSIC_OAUTH_CLIENT_ID=… \
+YTMUSIC_OAUTH_CLIENT_SECRET=… \
+./bin/youtube-go-mcp
 ```
 
 Logs go to **stderr** only — stdout is reserved for the MCP protocol.
@@ -78,10 +88,12 @@ Example Cursor / client config:
 ```json
 {
   "mcpServers": {
-    "ytmusic": {
+    "youtube": {
       "command": "/usr/local/bin/youtube-go-mcp",
       "env": {
-        "YTMUSIC_HEADERS_PATH": "/secrets/ytmusic/headers.json"
+        "YTMUSIC_OAUTH_PATH": "/secrets/ytmusic/oauth.json",
+        "YTMUSIC_OAUTH_CLIENT_ID": "….apps.googleusercontent.com",
+        "YTMUSIC_OAUTH_CLIENT_SECRET": "…"
       }
     }
   }
@@ -109,12 +121,16 @@ Produces a static binary at `/usr/local/bin/youtube-go-mcp` (distroless-friendly
 ## Develop
 
 ```bash
-go test ./...
-go vet ./...
+make tools          # goimports-reviser + golangci-lint v2
+make install-hooks  # pre-commit: fmt → lint → test + ≥70% coverage
+make check          # same as the pre-commit hook
+make coverage       # coverprofile for ./internal/... (fails under 70%)
 make self-test
 ```
 
-Client package: `internal/ytmusic`. MCP wiring: `internal/mcp` + `cmd/youtube-go-mcp`.
+Coverage gate measures **`./internal/...`** — InnerTube client (`ytmusic`) + MCP tool surface (`mcp`). CLI / release helpers under `cmd/` are excluded on purpose.
+
+CI builds, lints, enforces **≥70%** on that scope, and publishes a coverage badge to `gh-pages`.
 
 ## License
 

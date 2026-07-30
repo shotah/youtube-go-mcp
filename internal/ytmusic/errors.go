@@ -4,14 +4,18 @@ import "errors"
 
 var (
 	// ErrAuthRequired is returned when an authenticated endpoint is called without credentials.
-	ErrAuthRequired = errors.New("ytmusic: authentication required (set YTMUSIC_HEADERS_PATH or pass BrowserAuth)")
-	// ErrInvalidAuth is returned when headers/cookies are present but unusable.
-	ErrInvalidAuth = errors.New("ytmusic: invalid authentication headers (missing cookie or SAPISID)")
-	// ErrSessionExpired is returned when InnerTube rejects the browser session (401/403).
-	ErrSessionExpired = errors.New("ytmusic: browser session expired or revoked — re-export headers from music.youtube.com (see docs/auth.md)")
+	ErrAuthRequired = errors.New("ytmusic: authentication required (set YTMUSIC_OAUTH_PATH or YTMUSIC_HEADERS_PATH)")
+	// ErrInvalidAuth is returned when credentials are present but unusable.
+	ErrInvalidAuth = errors.New("ytmusic: invalid authentication credentials")
+	// ErrSessionExpired is returned when InnerTube / OAuth rejects the session (401/403).
+	ErrSessionExpired = errors.New("ytmusic: session expired or revoked — refresh OAuth (preferred) or re-export browser headers (see docs/auth.md)")
 	// ErrRateLimited is returned after retries are exhausted on HTTP 429/503.
 	ErrRateLimited = errors.New("ytmusic: rate limited by YouTube Music (HTTP 429/503) after retries")
+	// ErrOAuthPending means the user has not finished the device consent screen yet.
+	ErrOAuthPending = errors.New("ytmusic: oauth authorization_pending")
+	// ErrOAuthSlowDown means the device-code poll interval should increase.
+	ErrOAuthSlowDown = errors.New("ytmusic: oauth slow_down")
 )
 
 // AuthRefreshHint is short guidance for agents / operators when auth fails at runtime.
-const AuthRefreshHint = "Re-run: youtube-go-mcp auth --out headers.json (or replace the mounted headers file). The MCP reloads that file when its mtime changes; restart only if the process still has no AuthPath. Do not log out of music.youtube.com in the browser that minted the session unless you intend to invalidate it."
+const AuthRefreshHint = "Prefer OAuth: ensure YTMUSIC_OAUTH_PATH + YTMUSIC_OAUTH_CLIENT_ID/SECRET are set (re-run: youtube-go-mcp auth oauth). Browser cookies: re-export headers.json and keep a dedicated minting profile — logging into YouTube in that profile often kills the jar."

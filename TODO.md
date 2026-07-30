@@ -107,6 +107,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 - [x] Rate-limit / backoff on InnerTube 429s
 - [x] Client version config (env override without rebuild)
 - [x] Cookie refresh docs when Premium session dies
+- [x] OAuth device flow (`auth oauth`) + auto refresh + `YTMUSIC_OAUTH_*` env
 - [x] Release binaries (GoReleaser on `v*` tags)
 
 ---
@@ -116,7 +117,7 @@ Search alone is not enough. Nest / Cast needs a path that understands YouTube.
 | Topic | Decision |
 |---|---|
 | Language | Go only (static binary for distroless agent hosts) |
-| Auth | Browser cookies / headers — not YouTube Data API v3 for library |
+| Auth | OAuth device flow + refresh (preferred); browser cookies as legacy fallback |
 | Official Data API | Skip for Music library; may use later only if needed for something else |
 | Cast | Separate MCP (e.g. mcp-beam); this repo sources identity + IDs |
 | Python rewrite | No — expand this client instead |
@@ -171,5 +172,5 @@ Checklist:
 - [x] Rename MCP tool registrations
 - [x] Update README / self-test docs
 - [x] Tests
-- [ ] Release; update ai-gantry `TOOLS.md` + host `mcp.toml` server id `ytmusic` → `youtube` (cast handoff still uses video ids from tracks)
+- [x] Release; update ai-gantry `TOOLS.md` + host `mcp.toml` server id `youtube` (`v0.1.0` on host; cast handoff still uses video ids)
 

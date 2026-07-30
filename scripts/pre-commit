@@ -1,11 +1,13 @@
 #!/usr/bin/env sh
-# Pre-commit: autofix → lint → short tests
+# Pre-commit: autofix → lint → short tests + coverage ≥ 70% on ./internal/...
 set -eu
 
 ROOT=$(git rev-parse --show-toplevel)
 cd "$ROOT"
 
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM || true)
+MIN_COVERAGE="${MIN_COVERAGE:-70}"
+COVERAGE_PKG="${COVERAGE_PKG:-./internal/...}"
 
 echo "==> Autofix: goimports-reviser"
 if ! command -v goimports-reviser >/dev/null 2>&1; then
@@ -25,8 +27,11 @@ golangci-lint run --fix ./... || true
 echo "==> Lint"
 golangci-lint run ./...
 
-echo "==> Test (short)"
-go test -short ./...
+echo "==> Test + coverage (${COVERAGE_PKG}, min ${MIN_COVERAGE}%)"
+go test -short "${COVERAGE_PKG}" \
+	-coverprofile=coverage.out -covermode=atomic -count=1
+go tool cover -func=coverage.out
+go run ./scripts/check-coverage.go coverage.out "${MIN_COVERAGE}"
 
 # Re-stage files that were already staged (autofix may have rewritten them)
 if [ -n "$STAGED_FILES" ]; then

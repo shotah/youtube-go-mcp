@@ -39,8 +39,8 @@ help: ## Show this help
 	@echo   test                   Unit tests (PKG=./path/... for one package)
 	@echo   test-short             Unit tests with -short (skips live InnerTube)
 	@echo   test-race              Unit tests with the race detector
-	@echo   coverage               Coverage report for internal packages
-	@echo   check                  Autofix, lint, and short tests
+	@echo   coverage               Coverage for ./internal/... ^(fails if under MIN_COVERAGE^)
+	@echo   check                  Autofix, lint, short tests + coverage gate
 	@echo.
 	@echo Build ^& run
 	@echo   build                  Compile all packages (sanity check)
@@ -57,7 +57,7 @@ help: ## Show this help
 	@echo.
 	@echo Project-specific
 	@echo   auth                   Interactive headers export -^> headers.json
-	@echo   install-hooks          Install git pre-commit (autofix + lint + test)
+	@echo   install-hooks          Install git pre-commit (autofix + lint + coverage)
 	@echo   version                Show VERSION file + next patch (dry-run)
 	@echo   release                Bump tag + latest, update VERSION, push (BUMP=patch^|minor^|major)
 	@echo.
@@ -87,13 +87,17 @@ test-short: ## Unit tests with -short (skips live InnerTube)
 test-race: ## Unit tests with the race detector
 	go test -race $(PKG)
 
+# Heart of the logic: InnerTube client + MCP tools. Exclude cmd/ (CLI + release).
+# Override: make coverage COVERAGE_PKG=./...
 COVERAGE_PKG ?= ./internal/...
+MIN_COVERAGE ?= 70
 
-coverage: ## Tests + coverage report for internal packages (writes coverage.out; -short skips live InnerTube)
-	go test -short -cover "-coverprofile=coverage.out" $(COVERAGE_PKG)
+coverage: ## Tests + coverage for COVERAGE_PKG; fails if total < MIN_COVERAGE (default 70)
+	go test -short -cover "-coverprofile=coverage.out" -covermode=atomic $(COVERAGE_PKG)
 	go tool cover "-func=coverage.out"
+	go run ./scripts/check-coverage.go coverage.out $(MIN_COVERAGE)
 
-check: fmt lint test-short ## Autofix, lint, short tests (matches pre-commit)
+check: fmt lint coverage ## Autofix, lint, short tests + coverage gate (matches pre-commit)
 
 ##@ Build & run
 

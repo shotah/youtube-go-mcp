@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,7 +31,9 @@ type Client struct {
 	Auth          *BrowserAuth
 	// AuthPath is the headers.json path to auto-reload when the file's mtime changes.
 	AuthPath string
-	Now      func() time.Time
+	// OAuth is the preferred durable auth (Bearer + refresh_token).
+	OAuth *OAuthSession
+	Now   func() time.Time
 	// Sleep is used for throttle/backoff delays; defaults to time.Sleep.
 	Sleep func(time.Duration)
 
@@ -45,7 +48,8 @@ type Client struct {
 }
 
 // NewClient returns a Client with sensible defaults.
-// If YTMUSIC_HEADERS_PATH is set, browser auth is loaded automatically.
+// Loads OAuth from YTMUSIC_OAUTH_PATH when client id/secret env vars are set;
+// otherwise falls back to browser headers from YTMUSIC_HEADERS_PATH.
 func NewClient() *Client {
 	c := &Client{
 		HTTPClient:         &http.Client{Timeout: 30 * time.Second},
@@ -73,8 +77,13 @@ func NewClient() *Client {
 			c.MaxRetries = n
 		}
 	}
-	if path := os.Getenv(envHeadersPath); path != "" {
-		_ = c.SetAuthPath(path)
+	if path := os.Getenv(envOAuthPath); path != "" {
+		_ = c.SetOAuthPath(path, os.Getenv(envOAuthClientID), os.Getenv(envOAuthClientSecret))
+	}
+	if c.OAuth == nil {
+		if path := os.Getenv(envHeadersPath); path != "" {
+			_ = c.SetAuthPath(path)
+		}
 	}
 	return c
 }
@@ -98,11 +107,55 @@ func (c *Client) SetAuthPath(path string) error {
 	return c.reloadAuthLocked(true)
 }
 
-// WithAuth returns a shallow copy using the given auth (shares the rate limiter).
-// AuthPath is cleared so the copy does not keep reloading the previous file.
+// SetOAuthPath loads oauth.json and configures refresh with the given client credentials.
+func (c *Client) SetOAuthPath(path, clientID, clientSecret string) error {
+	if c == nil {
+		return ErrInvalidAuth
+	}
+	creds := OAuthCredentials{
+		ClientID:     strings.TrimSpace(clientID),
+		ClientSecret: strings.TrimSpace(clientSecret),
+		HTTPClient:   c.HTTPClient,
+	}
+	if err := creds.validate(); err != nil {
+		return err
+	}
+	tok, err := LoadOAuthTokenFromFile(path)
+	if err != nil {
+		return err
+	}
+	c.OAuth = &OAuthSession{
+		Credentials: creds,
+		Token:       tok,
+		Path:        path,
+		Now:         c.Now,
+	}
+	// Prefer OAuth over brittle browser cookies when both are present.
+	c.Auth = nil
+	c.AuthPath = ""
+	return nil
+}
+
+// WithAuth returns a shallow copy using the given browser auth (shares the rate limiter).
+// AuthPath / OAuth are cleared so the copy does not keep reloading prior credentials.
 func (c *Client) WithAuth(auth *BrowserAuth) *Client {
 	cp := *c
 	cp.Auth = auth
+	cp.AuthPath = ""
+	cp.OAuth = nil
+	cp.authModTime = time.Time{}
+	cp.authMu = &sync.Mutex{}
+	if cp.limiter == nil {
+		cp.limiter = &rateLimiter{}
+	}
+	return &cp
+}
+
+// WithOAuth returns a shallow copy using the given OAuth session.
+func (c *Client) WithOAuth(session *OAuthSession) *Client {
+	cp := *c
+	cp.OAuth = session
+	cp.Auth = nil
 	cp.AuthPath = ""
 	cp.authModTime = time.Time{}
 	cp.authMu = &sync.Mutex{}
@@ -112,10 +165,13 @@ func (c *Client) WithAuth(auth *BrowserAuth) *Client {
 	return &cp
 }
 
-// Authenticated reports whether browser credentials are configured.
+// Authenticated reports whether usable credentials are configured (OAuth or browser).
 func (c *Client) Authenticated() bool {
 	if c == nil {
 		return false
+	}
+	if c.OAuth != nil && c.OAuth.Ready() {
+		return true
 	}
 	c.maybeReloadAuth()
 	return c.Auth != nil && c.Auth.Cookie != "" && c.Auth.SAPISID != ""

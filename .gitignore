@@ -23,8 +23,10 @@ coverage.txt
 # Auth / secrets — never commit
 headers.json
 browser.json
+oauth.json
 **/headers.json
 **/browser.json
+**/oauth.json
 secrets/
 *.cookies
 cookies.txt

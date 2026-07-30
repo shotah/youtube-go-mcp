@@ -524,8 +524,8 @@ func SelfTest(client *ytmusic.Client) error {
 	if client == nil {
 		client = ytmusic.NewClient()
 	}
-	fmt.Fprintf(os.Stderr, "version=%s auth=%v headers_path=%q\n",
-		ServerVersion, client.Authenticated(), os.Getenv("YTMUSIC_HEADERS_PATH"))
+	fmt.Fprintf(os.Stderr, "version=%s auth=%v oauth_path=%q headers_path=%q\n",
+		ServerVersion, client.Authenticated(), os.Getenv("YTMUSIC_OAUTH_PATH"), os.Getenv("YTMUSIC_HEADERS_PATH"))
 
 	result, err := client.TrackSearch("test").Next()
 	if err != nil {
