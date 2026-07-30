@@ -10,7 +10,7 @@ Working board for turning this repo (seeded from [raitonoberu/ytmusic](https://g
 
 - [x] Seed repo with ytmusic Go client (search, watch playlist, lyrics, suggestions)
 - [x] Rebrand module path away from `github.com/raitonoberu/ytmusic` → `github.com/shotah/youtube-go-mcp`
-- [x] Bump Go version (seed is `go 1.16`; target 1.22+)
+- [x] Bump Go version (seed is `go 1.16`; now `go 1.26.0`)
 - [x] Refresh InnerTube `clientVersion` / headers (seed last touched ~2024 — expect breakage)
 
 ---

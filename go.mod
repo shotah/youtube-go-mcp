@@ -1,6 +1,6 @@
 module github.com/shotah/youtube-go-mcp
 
-go 1.25.0
+go 1.26.0
 
 require github.com/modelcontextprotocol/go-sdk v1.6.1
 
