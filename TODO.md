@@ -160,11 +160,64 @@ Not a second backend — thin helpers on top of v3 ([docs/music.md](docs/music.m
 
 ---
 
+## Phase G — Supporting Google Nest Mini
+
+**Status:** this package done (hints + docs); playback fix tracked in mcp-beam  
+
+**Why:** Nest Hub Max (display) accepts YouTube / video containers; Nest Mini
+(audio-only Cast) rejects or silently drops loads when MIME/container/app id
+assume a video receiver. No second MCP server — fix the handoff between this
+package (source) and mcp-beam (playback).
+
+### Root cause (Cast path)
+
+| Factor | Display (Hub Max) | Audio-only (Nest Mini) |
+|---|---|---|
+| MIME / `contentType` | Tolerates `video/*`, HLS with video | Rejects `video/*` or containers with video tracks it cannot decode |
+| Stream shape | Combined A/V OK | Needs demuxed audio (M4A/AAC/Opus → `audio/mp4` / `audio/webm`) **or** a YouTube receiver path that declares audio-only |
+| Receiver / metadata | Generic / video metadata OK | Prefer Default Media Receiver + `streamType: BUFFERED` + `audio/*`, or YouTube MDX with `_audioOnly=true`; music metadata `type: 3` (MusicTrackMediaMetadata) |
+
+Native YouTube Cast app (`233637DE`) on speakers is fragile unless lounge
+params advertise audio-only. Direct `media_beam` of a video container fails
+harder. **Audio/`audio/mp4` payloads work on both Hub Max and Nest Mini.**
+
+### This package (`youtube-go-mcp`)
+
+Data API v3 still does **not** return playable stream URLs. Nest Mini support
+here is contract + optional enrichment — not a player.
+
+- [x] Docs (`docs/cast.md`): Nest Mini / audio-only target notes; bridge must
+      send `audio/*` (or YouTube MDX `_audioOnly`) — do not invent MP3 URLs
+- [x] `cast_format_target` (and video rows as needed): optional hints for
+      audio-capable bridges — `preferredMediaKind`, `preferredContentType`,
+      `castMetadataType`, `title`/`artist`, `audioOnlyTarget` input
+- [x] Decision lock: **stream extraction stays out of this binary** unless we
+      explicitly reopen player/yt-dlp (conflicts with Phase B Data-API-only).
+      Prefer mcp-beam (or a dedicated extractor) to resolve demuxed audio when
+      `devices_list.is_audio_only` is true
+- [ ] Smoke checklist: Hub Max + Nest Mini with same `video_id` handoff via
+      mcp-beam after bridge fix
+
+### Partner package (`mcp-beam`) — track there
+
+See mcp-beam `TODO.md` → **Supporting Google Nest Mini**.
+
+### Architecture (single cast endpoint)
+
+```text
+youtube-go-mcp          mcp-beam
+  videoId / hints  -->  devices_list (is_audio_only?)
+                        ├─ display  → YouTube receiver / video OK
+                        └─ speaker  → _audioOnly or audio/* LOAD
+```
+
+---
+
 ## Immediate next
 
-1. Update ai-gantry `TOOLS.md` / host mcp config for `youtube__videos_*` (breaking rename)  
-2. Cut release when host is ready  
-3. Phase E music filters as needed (optional)
+1. Phase G: Nest Mini — doc + cast hints here; mcp-beam `_audioOnly` / LOAD MIME  
+2. Update ai-gantry `TOOLS.md` / host mcp config for `youtube__videos_*` (breaking rename)  
+3. Cut release when host is ready  
 
 ---
 
@@ -175,3 +228,5 @@ Not a second backend — thin helpers on top of v3 ([docs/music.md](docs/music.m
 3. Default search: all of YouTube, or music-leaning with opt-out?  
 4. Write tools later (`videos.rate`, playlist mutate) — after read path is solid?  
 5. ~~Shared naming doc?~~ — **yes:** [ai-gantry/docs/mcp-naming.md](https://github.com/shotah/ai-gantry/blob/main/docs/mcp-naming.md)  
+6. Nest Mini: keep YouTube MDX + `_audioOnly`, or demuxed `audio/mp4` via Default Media Receiver (or both)?  
+

@@ -26,7 +26,7 @@ Tool naming follows [ai-gantry mcp-naming](https://github.com/shotah/ai-gantry/b
 | `playlists_get` | required | Videos in a playlist (`PL…` / `LL…`) |
 | `library_list_playlists` | required | Channel-owned playlists |
 | `library_list_liked_videos` | required | Thumbs-up likes (`musicOnly` keeps music-leaning) |
-| `cast_format_target` | no | `videoId` / `video_id` + URLs for a playback bridge |
+| `cast_format_target` | no* | `videoId` + Nest/audio bridge hints (`preferredMediaKind`, `audioOnlyTarget`) |
 
 Music is a **filter on Data API**, not a second backend — see [docs/music.md](docs/music.md).
 
@@ -90,7 +90,11 @@ Playback is whatever bridge you use (Cast MCP, Assistant, manual).
 | `musicUrl` | Only when content looks like music (category 10 / Topic channel) |
 
 **Same handoff for song or video:** take `video_id` → pass to your YouTube Cast
-bridge (e.g. mcp-beam / `cast__youtube_beam_video`). Details: [docs/cast.md](docs/cast.md).
+bridge (e.g. mcp-beam / `cast__youtube_beam_video`). For Nest Mini / speakers,
+set `audioOnlyTarget` on `cast_format_target` (or use `preferredMediaKind: audio`
+from music rows). Details: [docs/cast.md](docs/cast.md).
+
+\* Auth optional: enriches `title` / `artist` / music heuristics when OAuth is ready.
 
 ## License
 

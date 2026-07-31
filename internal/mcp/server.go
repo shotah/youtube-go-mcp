@@ -93,13 +93,26 @@ func (s *Server) Run(ctx context.Context) error {
 	}, s.listLikedVideos)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        ToolCastFormatTarget,
-		Description: "Format a videoId into cast-ready fields (videoId, video_id, url). Playback is separate — pass video_id to your Cast/YouTube bridge. Same handoff for music or any video.",
+		Name: ToolCastFormatTarget,
+		Description: "Format a videoId into cast-ready fields (videoId, video_id, url) plus Nest/audio bridge hints " +
+			"(preferredMediaKind, preferredContentType, castMetadataType). Playback is separate — pass video_id to " +
+			"your Cast/YouTube bridge. Set audioOnlyTarget when the device is a Nest Mini / speaker.",
 	}, s.formatCastTarget)
 
 	s.Log.Printf("starting stdio MCP (%s %s), auth=%v", ServerName, ServerVersion, s.ready())
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
+
+// Media kind / Cast metadata constants for audio-only bridges (Nest Mini, etc.).
+const (
+	MediaKindAudio = "audio"
+	MediaKindVideo = "video"
+	// CastMetadataMusicTrack is Chromecast MusicTrackMediaMetadata (type 3).
+	CastMetadataMusicTrack = 3
+	// CastMetadataGeneric is Chromecast GenericMediaMetadata (type 0).
+	CastMetadataGeneric = 0
+	ContentTypeAudioMP4 = "audio/mp4"
+)
 
 type videoOut struct {
 	VideoID      string `json:"videoId"`
@@ -113,11 +126,13 @@ type videoOut struct {
 	MusicURL     string `json:"musicUrl,omitempty"`
 	// MusicLikely is true when category / Topic / title heuristics say music.
 	MusicLikely bool `json:"musicLikely,omitempty"`
+	// PreferredMediaKind is "audio" when music-leaning (Nest Mini–friendly hint).
+	PreferredMediaKind string `json:"preferredMediaKind,omitempty"`
 }
 
 func videoToOut(v youtube.Video) videoOut {
 	likely := youtube.LooksLikeMusic(v) || v.MusicURL != ""
-	return videoOut{
+	out := videoOut{
 		VideoID:      v.VideoID,
 		VideoIDSnake: v.VideoID,
 		Title:        v.Title,
@@ -129,6 +144,10 @@ func videoToOut(v youtube.Video) videoOut {
 		MusicURL:     v.MusicURL,
 		MusicLikely:  likely,
 	}
+	if likely {
+		out.PreferredMediaKind = MediaKindAudio
+	}
+	return out
 }
 
 type searchVideosInput struct {
@@ -295,14 +314,24 @@ func (s *Server) listLikedVideos(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 type castTargetInput struct {
-	VideoID string `json:"videoId" jsonschema:"YouTube videoId"`
+	VideoID         string `json:"videoId" jsonschema:"YouTube videoId"`
+	AudioOnlyTarget bool   `json:"audioOnlyTarget,omitempty" jsonschema:"Set true for Nest Mini / Chromecast Audio / other is_audio_only devices"`
+	Title           string `json:"title,omitempty" jsonschema:"Optional title for Cast music metadata"`
+	Artist          string `json:"artist,omitempty" jsonschema:"Optional artist (channel title) for Cast music metadata"`
+	MusicLikely     bool   `json:"musicLikely,omitempty" jsonschema:"Hint that content is music-leaning (prefer audio kind + metadata type 3)"`
 }
 
 type castTargetOutput struct {
-	VideoID      string `json:"videoId"`
-	VideoIDSnake string `json:"video_id"`
-	URL          string `json:"url"`
-	CastHint     string `json:"castHint"`
+	VideoID              string `json:"videoId"`
+	VideoIDSnake         string `json:"video_id"`
+	URL                  string `json:"url"`
+	Title                string `json:"title,omitempty"`
+	Artist               string `json:"artist,omitempty"`
+	PreferredMediaKind   string `json:"preferredMediaKind"`
+	PreferredContentType string `json:"preferredContentType,omitempty"`
+	// CastMetadataType is Chromecast metadata.type (3=music track, 0=generic).
+	CastMetadataType int    `json:"castMetadataType"`
+	CastHint         string `json:"castHint"`
 }
 
 func (s *Server) formatCastTarget(ctx context.Context, _ *mcp.CallToolRequest, in castTargetInput) (*mcp.CallToolResult, castTargetOutput, error) {
@@ -311,14 +340,50 @@ func (s *Server) formatCastTarget(ctx context.Context, _ *mcp.CallToolRequest, i
 	if id == "" {
 		return toolError("videoId is required"), castTargetOutput{}, nil
 	}
-	return nil, castTargetOutput{
+
+	title := strings.TrimSpace(in.Title)
+	artist := strings.TrimSpace(in.Artist)
+	musicLikely := in.MusicLikely
+
+	// When OAuth is ready and caller omitted metadata, enrich from Data API.
+	if s.ready() && (title == "" || artist == "" || !musicLikely) {
+		if v, err := s.YT.GetVideo(id); err == nil && v != nil {
+			if title == "" {
+				title = v.Title
+			}
+			if artist == "" {
+				artist = v.ChannelTitle
+			}
+			if !musicLikely {
+				musicLikely = youtube.LooksLikeMusic(*v) || v.MusicURL != ""
+			}
+		}
+	}
+
+	preferAudio := in.AudioOnlyTarget || musicLikely
+	out := castTargetOutput{
 		VideoID:      id,
 		VideoIDSnake: id,
 		URL:          youtube.WatchURL(id),
-		CastHint: "Pass video_id to your Cast/YouTube playback bridge " +
-			"(e.g. mcp-beam beam_youtube_video or cast__youtube_beam_video). " +
-			"Same handoff for a song or any video. Do not pass url as a generic media URL.",
-	}, nil
+		Title:        title,
+		Artist:       artist,
+	}
+	if preferAudio {
+		out.PreferredMediaKind = MediaKindAudio
+		out.PreferredContentType = ContentTypeAudioMP4
+		out.CastMetadataType = CastMetadataMusicTrack
+		out.CastHint = "Pass video_id to cast__youtube_beam_video (or mcp-beam youtube_beam_video). " +
+			"Audio-only / Nest Mini: bridge should set YouTube MDX _audioOnly=true when devices_list.is_audio_only, " +
+			"or LOAD demuxed audio with contentType audio/mp4, streamType BUFFERED, metadata.type=3. " +
+			"Do not pass url as a generic video/* media URL."
+	} else {
+		out.PreferredMediaKind = MediaKindVideo
+		out.CastMetadataType = CastMetadataGeneric
+		out.CastHint = "Pass video_id to cast__youtube_beam_video (or mcp-beam youtube_beam_video). " +
+			"Same handoff for a song or any video. Do not pass url as a generic media URL. " +
+			"For Nest Mini / is_audio_only devices, re-call with audioOnlyTarget=true."
+	}
+	return nil, out, nil
 }
 
 func clampLimit(limit, defaultLimit, maxLimit int) int {

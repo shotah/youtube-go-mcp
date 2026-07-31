@@ -25,6 +25,33 @@ func TestFormatCastTarget(t *testing.T) {
 	if out.VideoID != "abcdefghijk" || out.VideoIDSnake != out.VideoID || out.CastHint == "" || out.URL == "" {
 		t.Fatalf("%+v", out)
 	}
+	if out.PreferredMediaKind != MediaKindVideo || out.CastMetadataType != CastMetadataGeneric {
+		t.Fatalf("default should be video/generic: %+v", out)
+	}
+
+	res, audioOut, err := s.formatCastTarget(ctx, nil, castTargetInput{
+		VideoID: "abcdefghijk", AudioOnlyTarget: true,
+		Title: "Song", Artist: "Artist",
+	})
+	if err != nil || res != nil {
+		t.Fatalf("audio: res=%v err=%v", res, err)
+	}
+	if audioOut.PreferredMediaKind != MediaKindAudio ||
+		audioOut.PreferredContentType != ContentTypeAudioMP4 ||
+		audioOut.CastMetadataType != CastMetadataMusicTrack ||
+		audioOut.Title != "Song" || audioOut.Artist != "Artist" {
+		t.Fatalf("audio-only hints: %+v", audioOut)
+	}
+
+	res, musicOut, err := s.formatCastTarget(ctx, nil, castTargetInput{
+		VideoID: "abcdefghijk", MusicLikely: true,
+	})
+	if err != nil || res != nil {
+		t.Fatalf("music: res=%v err=%v", res, err)
+	}
+	if musicOut.PreferredMediaKind != MediaKindAudio || musicOut.CastMetadataType != CastMetadataMusicTrack {
+		t.Fatalf("musicLikely should prefer audio: %+v", musicOut)
+	}
 }
 
 func TestVideoOutCastFields(t *testing.T) {
@@ -35,12 +62,18 @@ func TestVideoOutCastFields(t *testing.T) {
 	if music.VideoIDSnake != music.VideoID || music.URL == "" || music.MusicURL == "" || !music.MusicLikely {
 		t.Fatalf("music row: %+v", music)
 	}
+	if music.PreferredMediaKind != MediaKindAudio {
+		t.Fatalf("music row should prefer audio: %+v", music)
+	}
 	plain := videoToOut(youtube.Video{
 		VideoID: "plainvid001", Title: "Talk", CategoryID: "22",
 		URL: youtube.WatchURL("plainvid001"),
 	})
 	if plain.VideoIDSnake != plain.VideoID || plain.URL == "" || plain.MusicURL != "" || plain.MusicLikely {
 		t.Fatalf("plain row should omit music flags: %+v", plain)
+	}
+	if plain.PreferredMediaKind != "" {
+		t.Fatalf("plain row should omit preferredMediaKind: %+v", plain)
 	}
 }
 
