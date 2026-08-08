@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	mcpserver "github.com/shotah/youtube-go-mcp/internal/mcp"
 	"github.com/shotah/youtube-go-mcp/internal/youtube"
@@ -109,6 +110,16 @@ func runAuth(args []string) int {
 }
 
 func runAuthOAuth(args []string) int {
+	// Check for start/wait subcommands before flag parsing.
+	if len(args) > 0 {
+		switch args[0] {
+		case "start", "--start":
+			return runAuthOAuthStart(args[1:])
+		case "wait", "--wait":
+			return runAuthOAuthWait(args[1:])
+		}
+	}
+
 	fs := flag.NewFlagSet("auth oauth", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	outPath := fs.String("out", "oauth.json", "output oauth.json path")
@@ -117,8 +128,17 @@ func runAuthOAuth(args []string) int {
 	validate := fs.String("validate", "", "validate an existing oauth.json and exit")
 	whoami := fs.Bool("whoami", false, "print Google tokeninfo + YouTube channel for configured OAuth and exit")
 	probeData := fs.Bool("probe-data-api", false, "Data API v3 smoke: channels.list mine + videos.list myRating=like")
+	startFlag := fs.Bool("start", false, "print device code and persist pending session (no poll)")
+	waitFlag := fs.Bool("wait", false, "resume polling for a pending device session")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+
+	if *startFlag {
+		return runAuthOAuthStart(fs.Args())
+	}
+	if *waitFlag {
+		return runAuthOAuthWait(fs.Args())
 	}
 
 	if *validate != "" {
@@ -166,6 +186,107 @@ func runAuthOAuth(args []string) int {
 	fmt.Fprintln(os.Stderr, "  YOUTUBE_OAUTH_CLIENT_ID=<same client id>")
 	fmt.Fprintln(os.Stderr, "  YOUTUBE_OAUTH_CLIENT_SECRET=<same client secret>")
 	fmt.Fprintln(os.Stderr, "(Legacy YTMUSIC_OAUTH_* names still work.)")
+	return 0
+}
+
+// getDeviceCode is overridable in tests.
+var getDeviceCode = func(creds *ytmusic.OAuthCredentials) (*ytmusic.DeviceCode, error) {
+	return creds.GetDeviceCode()
+}
+
+// pollDeviceToken is overridable in tests.
+var pollDeviceToken = ytmusic.PollDeviceToken
+
+func runAuthOAuthStart(args []string) int {
+	fs := flag.NewFlagSet("auth oauth start", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	outPath := fs.String("out", "oauth.json", "output oauth.json path")
+	clientID := fs.String("client-id", "", "Google OAuth client id (or YOUTUBE_OAUTH_CLIENT_ID)")
+	clientSecret := fs.String("client-secret", "", "Google OAuth client secret (or YOUTUBE_OAUTH_CLIENT_SECRET)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	creds := ytmusic.OAuthCredentials{
+		ClientID:     firstFlagOrEnv(*clientID, ytmusic.EnvOAuthClientID, "YTMUSIC_OAUTH_CLIENT_ID"),
+		ClientSecret: firstFlagOrEnv(*clientSecret, ytmusic.EnvOAuthClientSecret, "YTMUSIC_OAUTH_CLIENT_SECRET"),
+	}
+	code, err := getDeviceCode(&creds)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oauth start: %v\n", err)
+		return 1
+	}
+
+	outResolved := *outPath
+	if envPath := ytmusic.EnvFirst(ytmusic.EnvOAuthPath, "YTMUSIC_OAUTH_PATH"); envPath != "" {
+		outResolved = envPath
+	}
+
+	session := &ytmusic.PendingDeviceSession{
+		DeviceCode: code.DeviceCode,
+		Interval:   code.Interval,
+		ExpiresIn:  code.ExpiresIn,
+		OutPath:    outResolved,
+		ExpiresAt:  time.Now().Add(ytmusic.PendingSessionTTL),
+	}
+	if err := ytmusic.SavePending(session, outResolved); err != nil {
+		fmt.Fprintf(os.Stderr, "oauth start: save pending: %v\n", err)
+		return 1
+	}
+
+	fmt.Printf("open %s\nenter code: %s\nthen: /auth youtube wait\nguide: https://github.com/shotah/ai-gantry/blob/main/docs/auth.md\n",
+		code.VerificationLink(), code.UserCode)
+	return 0
+}
+
+func runAuthOAuthWait(args []string) int {
+	fs := flag.NewFlagSet("auth oauth wait", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	outPath := fs.String("out", "oauth.json", "output oauth.json path")
+	clientID := fs.String("client-id", "", "Google OAuth client id (or YOUTUBE_OAUTH_CLIENT_ID)")
+	clientSecret := fs.String("client-secret", "", "Google OAuth client secret (or YOUTUBE_OAUTH_CLIENT_SECRET)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+
+	outResolved := *outPath
+	if envPath := ytmusic.EnvFirst(ytmusic.EnvOAuthPath, "YTMUSIC_OAUTH_PATH"); envPath != "" {
+		outResolved = envPath
+	}
+
+	session, err := ytmusic.LoadPending(outResolved)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oauth wait: %v\n", err)
+		return 1
+	}
+
+	creds := ytmusic.OAuthCredentials{
+		ClientID:     firstFlagOrEnv(*clientID, ytmusic.EnvOAuthClientID, "YTMUSIC_OAUTH_CLIENT_ID"),
+		ClientSecret: firstFlagOrEnv(*clientSecret, ytmusic.EnvOAuthClientSecret, "YTMUSIC_OAUTH_CLIENT_SECRET"),
+	}
+	deviceCode := &ytmusic.DeviceCode{
+		DeviceCode: session.DeviceCode,
+		Interval:   session.Interval,
+		ExpiresIn:  session.ExpiresIn,
+	}
+
+	tok, err := pollDeviceToken(context.Background(), creds, deviceCode)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oauth wait: %v\n", err)
+		return 1
+	}
+
+	savePath := session.OutPath
+	if savePath == "" {
+		savePath = outResolved
+	}
+	if err := tok.Save(savePath); err != nil {
+		fmt.Fprintf(os.Stderr, "oauth wait: write %s: %v\n", savePath, err)
+		return 1
+	}
+	ytmusic.RemovePending(outResolved)
+
+	fmt.Printf("youtube: authorized ✓ (tokens → %s)\n", savePath)
 	return 0
 }
 
@@ -264,6 +385,8 @@ func printAuthUsage(w io.Writer) {
 	fmt.Fprint(w, `youtube-go-mcp auth — credentials helpers
 
   youtube-go-mcp auth oauth [--out oauth.json] [--client-id ID] [--client-secret SECRET]
+  youtube-go-mcp auth oauth start [--out path]    # print device code, save pending, exit
+  youtube-go-mcp auth oauth wait  [--out path]    # poll pending session until authorized
   youtube-go-mcp auth oauth --validate oauth.json
   youtube-go-mcp auth oauth --whoami              # tokeninfo + YouTube channel
   youtube-go-mcp auth oauth --probe-data-api      # Data API: channels.mine + liked videos
